@@ -7,6 +7,6 @@
     ../modules/infra.nix
     ../modules/node.nix
     ../modules/python.nix
-    ../modules/web.nix
+    ../modules/scraping
   ];
 }
