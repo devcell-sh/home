@@ -27,57 +27,49 @@ let
 in
 {
   # LD_LIBRARY_PATH for non-nix binaries (Chromium, Electron, downloaded tools).
-  # 2 layers:
-  #   Layer 1: 06-nix-ldpath.sh entrypoint fragment — sources full closure path at container start.
-  #            Inherited by all services (50-gui.sh), fluxbox apps, xrdp sessions.
-  #   Layer 2: zsh initContent — sources same file for interactive shells (docker exec).
-  #
-  # TODO: Replace global LD_LIBRARY_PATH (35KB, 546 paths) with a hybrid approach:
-  #   1. patchelf/autoPatchelfHook at build time for known binaries (Chromium, Electron, Mesa)
-  #   2. Per-binary `run-with-nix-libs` wrapper for runtime-downloaded tools
-  #   Then remove the global export from 06-nix-ldpath.sh, 05-shell-rc.sh, and initContent.
-  #   Rationale: global LD_LIBRARY_PATH pollutes nix-built binaries (RPATH overridden,
-  #   see nixpkgs#327854), is fragile (tripling across rc files hit ARG_MAX), and requires
-  #   manual glibc exclusion. The .nix-ld-library-path file can stay for the wrapper to read.
+  # NIX_LD_LIBRARY_PATH points at /opt/devcell/.nix-ld-libs — a merged directory
+  # with symlinks to every .so* from the profile closure (glibc excluded).
+  # Set by OCI Env (pure) or Dockerfile ENV (impure), re-exported by
+  # 06-nix-ldpath.sh (entrypoint) and zsh initContent (docker exec).
+  # Only consulted by nix-ld shim — nix-built tools use RPATH untouched.
   #
   # The activation script (generateNixLdPath) scans the full profile closure at
   # home-manager switch time and writes /opt/devcell/.nix-ld-library-path into the image.
   # No circular dependency: the scan runs at activation time (after profile is built),
   # not at evaluation time.
 
-  # Activation script: scan the profile closure for lib/ dirs containing .so files.
-  # Output: /opt/devcell/.nix-ld-library-path (baked into image, not on bind mount).
+  # Activation script: create merged .nix-ld-libs/ directory with symlinks to
+  # every .so* from the profile closure (glibc excluded). This is the impure
+  # (Dockerfile) counterpart to the homeRoot builder in image.nix that does
+  # the same for pure (nix2container) images.
   #
   # Uses config.home.path (the NEW profile's nix store path) instead of
   # config.home.profileDirectory (a symlink that may still point to the old
-  # generation when this script runs). This avoids DAG ordering issues —
-  # we can safely run after "writeBoundary" since the store path is resolved
-  # at nix eval time, not via the runtime symlink.
-  #
-  # CRITICAL: exclude glibc from the path. Nix's glibc version differs from the system
-  # (Debian) glibc. Including it causes system binaries (tr, grep, wc, etc.) to load
-  # nix's libc.so.6 via LD_LIBRARY_PATH → symbol errors → crashes.
-  home.activation.generateNixLdPath = lib.hm.dag.entryAfter ["writeBoundary"] ''
-    _ldPaths=""
+  # generation when this script runs).
+  home.activation.generateNixLdLibs = lib.hm.dag.entryAfter ["writeBoundary"] ''
+    rm -rf "$HOME/.nix-ld-libs"
+    mkdir -p "$HOME/.nix-ld-libs"
     for _pkg in $(${pkgs.nix}/bin/nix-store -qR "${config.home.path}"); do
       case "$_pkg" in *-glibc-*) continue ;; esac
-      if [ -d "$_pkg/lib" ] && ls "$_pkg/lib/"*.so* >/dev/null 2>/dev/null; then
-        _ldPaths="$_ldPaths''${_ldPaths:+:}$_pkg/lib"
+      if [ -d "$_pkg/lib" ]; then
+        for _so in "$_pkg/lib/"*.so*; do
+          [ -e "$_so" ] || continue
+          _name=$(basename "$_so")
+          [ -e "$HOME/.nix-ld-libs/$_name" ] || ln -s "$_so" "$HOME/.nix-ld-libs/$_name"
+        done
       fi
     done
-    echo "$_ldPaths" > "$HOME/.nix-ld-library-path"
 
     # Stable symlink for mesa DRI drivers — avoids hardcoded nix store hash in 50-gui.sh.
-    # Without this, LIBGL_DRIVERS_PATH becomes stale after mesa version changes.
     ln -sfT "${pkgs.mesa}/lib/dri" "$HOME/.mesa-dri"
   '';
 
-  # Source the auto-generated path at shell init for interactive shells (docker exec).
-  # These don't inherit from the entrypoint, so they need their own export.
+  # NIX_LD_LIBRARY_PATH for interactive shells (docker exec) that bypass the
+  # entrypoint. Points at the merged .nix-ld-libs/ dir — no more ARG_MAX risk.
   programs.zsh.initContent = lib.mkAfter ''
-    if [ -f "/opt/devcell/.nix-ld-library-path" ] && [ -z "''${_DEVCELL_LD_SET:-}" ]; then
-      export LD_LIBRARY_PATH="$(cat /opt/devcell/.nix-ld-library-path)''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-      export _DEVCELL_LD_SET=1
+    if [ -d "/opt/devcell/.nix-ld-libs" ] && [ -z "''${_DEVCELL_NIX_LD_LIBPATH_SET:-}" ]; then
+      export NIX_LD_LIBRARY_PATH="/opt/devcell/.nix-ld-libs''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
+      export _DEVCELL_NIX_LD_LIBPATH_SET=1
     fi
   '';
 
@@ -108,6 +100,11 @@ in
 
     # X11 automation — simulate keyboard/mouse input, query windows
     xdotool # (use: xdotool key ctrl+c, xdotool search --name "Firefox")
+
+    # URL/MIME handler — many CLI tools (gh auth, gemini, wrangler, flyctl,
+    # npm login --web, gcloud) spawn `xdg-open <url>` to launch the system
+    # browser for OAuth flows. Without xdg-utils they fail with ENOENT.
+    xdg-utils # provides xdg-open, xdg-mime, xdg-settings
 
     # Terminal emulator — launched from fluxbox menu
     xterm
@@ -181,10 +178,45 @@ in
     barlow                 # grotesk sans — inspired by California plates
     lexend                 # readability-optimized sans — Google Fonts
     fraunces               # variable old-style serif — Google Fonts
+    vollkorn               # Friedrich Althausen — classic serif for body text
   ];
 
   # Enable user fontconfig so Chromium and X11 apps find the nix-installed fonts.
   fonts.fontconfig.enable = true;
+
+  # Default font families for serif/sans-serif/monospace. Chromium asks for
+  # "sans-serif" when rendering CSS `font-family: sans-serif` (or when the
+  # page specifies no family). Without these aliases, Chromium falls back to
+  # nothing and screenshots render with BLANK text. Each list is the
+  # preferred order; first available wins, plus an Emoji fallback so emoji
+  # glyphs don't show as tofu boxes.
+  fonts.fontconfig.defaultFonts = {
+    serif      = [ "IBM Plex Serif"   "Fraunces"     "Noto Color Emoji" ];
+    sansSerif  = [ "IBM Plex Sans"    "Inter"        "Noto Color Emoji" ];
+    monospace  = [ "Cascadia Code NF" "Iosevka Term" "JetBrainsMono Nerd Font" ];
+    emoji      = [ "Noto Color Emoji" ];
+  };
+
+  # ── Browser handoff for CLI auth flows ───────────────────────────────────
+  # CLI tools that need to open a URL for OAuth try, in order:
+  #   1) $BROWSER if set
+  #   2) xdg-open (covered by xdg-utils in home.packages above)
+  #   3) hardcoded fallback list (firefox, chrome, chromium, …)
+  # We set BROWSER explicitly so any tool that prefers it skips the xdg-open
+  # path; and register chromium-browser.desktop as the MIME default so the
+  # xdg-open path also works for tools that bypass $BROWSER.
+  home.sessionVariables.BROWSER = "chromium";
+
+  xdg.mimeApps = {
+    enable = true;
+    defaultApplications = {
+      "x-scheme-handler/http" = "chromium-browser.desktop";
+      "x-scheme-handler/https" = "chromium-browser.desktop";
+      "text/html" = "chromium-browser.desktop";
+      "x-scheme-handler/about" = "chromium-browser.desktop";
+      "x-scheme-handler/unknown" = "chromium-browser.desktop";
+    };
+  };
 
   # ── Fluxbox configuration ──────────────────────────────────────────────────
   # Declared via the home-manager fluxbox module — generates ~/.fluxbox/{init,menu,...}.
@@ -235,13 +267,15 @@ in
     '';
 
     # Chromium via the home-manager profile wrapper (includes --no-sandbox, --disable-gpu,
-    # --user-data-dir etc. set in web.nix). Shell expansion resolves $USER at runtime
-    # so the compat link /nix/var/nix/profiles/per-user/$USER/profile is used correctly
-    # regardless of which username the container runs as.
+    # --user-data-dir etc. set in scraping/default.nix). The wrapper enforces a singleton
+    # via fixed --user-data-dir, so a bare `chromium` on a second click hits the existing
+    # SingletonLock and silently prints "Opening in existing browser session." with no
+    # visible window. `--new-window` makes the IPC request a fresh window every click
+    # (and falls back to a normal cold start when chromium isn't running).
     menu = ''
       [begin] ([*.] devcell)
         [submenu] (Applications)
-          [exec] (Chromium) {sh -c 'chromium &'}
+          [exec] (Chromium) {chromium --new-window}
         [end]
         [exec] (Kitty) {${pkgs.kitty}/bin/kitty}
         [exec] (XTerm) {${pkgs.xterm}/bin/xterm}

@@ -17,10 +17,36 @@ chmod 1777 /tmp/.X11-unix
 export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=llvmpipe
 export LIBGL_DRIVERS_PATH="/opt/devcell/.mesa-dri"
-# LD_LIBRARY_PATH inherited from 06-nix-ldpath.sh (full profile closure)
+
+# Root-cause fix moved to 06-nix-ldpath.sh + 05-shell-rc.sh: on pure images
+# the closure-based LD_LIBRARY_PATH is no longer exported at all (it was a
+# Debian-base bootstrap that breaks versioned symbols on nix-built binaries
+# like uv's `_rjem_malloc` and x11vnc's libgpg-error). Kept as a no-op
+# placeholder so we don't have to rewrite every gosu invocation below — in
+# pure mode LD_LIBRARY_PATH is unset, so `env -u` is a harmless idempotent
+# strip; in legacy Debian mode it preserves the existing LD bootstrap for
+# debian-style GUI services.
+_NIX_ENV="env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET"
+
+# ── Restart-resilient service startup ─────────────────────────────────────
+# Each service: kill any stale instance, clean its lockfile/socket, then
+# spawn fresh with setsid + logfile. Idempotent — sourcing this fragment
+# twice (e.g. after container restart, manual reload) won't leave duplicate
+# processes or fail with "address already in use" / "Server already active".
 
 log "Starting Xvfb on display :${DISPLAY_NUM} (+GLX, Mesa llvmpipe)..."
-gosu "$USER" Xvfb :${DISPLAY_NUM} -screen 0 ${RESOLUTION} -dpi 96 +extension GLX +render +iglx 2>/dev/null &
+# Kill any stale Xvfb owned by the session user, remove its lockfile.
+# Xvfb refuses to start if /tmp/.X<N>-lock exists ("Server is already
+# active for display N") — happens on container restart with /tmp tmpfs.
+pkill -u "$USER" -x Xvfb 2>/dev/null
+sleep 0.2
+rm -f /tmp/.X${DISPLAY_NUM}-lock /tmp/.X11-unix/X${DISPLAY_NUM}
+# setsid → Xvfb survives entrypoint's `exec gosu <cmd>`. Without it, the
+# inherited controlling TTY makes Xvfb killable by signals the foreground
+# `cmd` (e.g. claude TUI) sends to its process group.
+# Output → /tmp/Xvfb.log so a crash isn't silent.
+setsid gosu "$USER" $_NIX_ENV Xvfb :${DISPLAY_NUM} -screen 0 ${RESOLUTION} -dpi 96 +extension GLX +render +iglx \
+    < /dev/null > /tmp/Xvfb.log 2>&1 &
 export DISPLAY=:${DISPLAY_NUM}
 # Wait for X server to accept connections (socket file appears before server is ready)
 for i in $(seq 1 40); do
@@ -41,7 +67,7 @@ PULSE_DIR="/tmp/pulse-runtime"
 mkdir -p "$PULSE_DIR"
 chown "$USER:$(id -gn "$USER")" "$PULSE_DIR"
 log "Starting PulseAudio (null sink)..."
-gosu "$USER" env XDG_RUNTIME_DIR="$PULSE_DIR" \
+gosu "$USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET XDG_RUNTIME_DIR="$PULSE_DIR" \
     pulseaudio --daemonize=yes --exit-idle-time=-1 --disable-shm=true -n \
     --load="module-null-sink sink_name=NullSink" \
     --load="module-native-protocol-unix" 2>/dev/null || true
@@ -54,9 +80,9 @@ if [ -f "$DEVCELL_HOME/.Xresources" ]; then
 fi
 
 if [ -f "$DEVCELL_HOME/.fluxbox/wallpaper.png" ]; then
-    gosu "$USER" feh --bg-fill "$DEVCELL_HOME/.fluxbox/wallpaper.png" 2>/dev/null || true
+    gosu "$USER" $_NIX_ENV feh --bg-fill "$DEVCELL_HOME/.fluxbox/wallpaper.png" 2>/dev/null || true
 else
-    gosu "$USER" xsetroot -solid '#1e1e2e' 2>/dev/null || true
+    gosu "$USER" $_NIX_ENV xsetroot -solid '#1e1e2e' 2>/dev/null || true
 fi
 
 FLUXBOX_RC=/tmp/fluxbox-init
@@ -69,7 +95,13 @@ else
     echo "session.screen0.workspaceNames: ${WORKSPACE_NAME}" >> "$FLUXBOX_RC"
 fi
 log "Starting fluxbox (workspace: ${WORKSPACE_NAME})..."
-gosu "$USER" fluxbox -rc "$FLUXBOX_RC" &>/dev/null &
+# Kill any stale fluxbox before starting fresh.
+pkill -u "$USER" -x fluxbox 2>/dev/null
+sleep 0.2
+# setsid + log file: same reason as Xvfb above — survive entrypoint exec
+# and surface crashes via /tmp/fluxbox.log.
+setsid gosu "$USER" $_NIX_ENV fluxbox -rc "$FLUXBOX_RC" \
+    < /dev/null > /tmp/fluxbox.log 2>&1 &
 # Poll for fluxbox process instead of fixed sleep 1
 for i in $(seq 1 20); do
     pgrep -u "$USER" fluxbox >/dev/null 2>&1 && break
@@ -77,12 +109,24 @@ for i in $(seq 1 20); do
 done
 
 if [ -f "$DEVCELL_HOME/.fluxbox/wallpaper.png" ]; then
-    gosu "$USER" feh --bg-fill "$DEVCELL_HOME/.fluxbox/wallpaper.png" 2>/dev/null || true
+    gosu "$USER" $_NIX_ENV feh --bg-fill "$DEVCELL_HOME/.fluxbox/wallpaper.png" 2>/dev/null || true
 fi
 
 log "Starting x11vnc on port 5900..."
-gosu "$USER" x11vnc -display :${DISPLAY_NUM} -forever -nevershared -passwd vnc -rfbport 5900 \
-    -desktop "${APP_NAME:-cell}" -pointer_mode 2 -repeat -xrandr &>/dev/null &
+# Kill any stale x11vnc so we don't fight for port 5900. Pause briefly so
+# the kernel releases the bind before our new instance attempts it.
+pkill -u "$USER" -x x11vnc 2>/dev/null
+sleep 0.2
+# WHY setsid: without it, x11vnc inherits the entrypoint's controlling TTY.
+# When the entrypoint later `exec`s gosu+<cmd> (e.g. claude — a TUI doing
+# its own TTY signal handling), x11vnc dies as a side effect → xrdp's
+# vnc-any backend can't reach 127.0.0.1:5900 → user sees "operation now
+# in progress" / "error connecting to user session" on the RDP client.
+# Reproduced 2026-05-15: this fix unblocks RDP-into-cell after the pure flip.
+# WHY log file: was &>/dev/null, which made the silent death undebuggable.
+setsid gosu "$USER" $_NIX_ENV x11vnc -display :${DISPLAY_NUM} -forever -nevershared -passwd vnc -rfbport 5900 \
+    -desktop "${APP_NAME:-cell}" -pointer_mode 2 -repeat -xrandr \
+    < /dev/null > /tmp/x11vnc.log 2>&1 &
 
 log "VNC server ready - connect to localhost:${EXT_VNC_PORT:-5900}"
 log "DISPLAY=:${DISPLAY_NUM}"
@@ -168,7 +212,15 @@ if [ -n "$XRDP_BIN" ]; then
     } >> "$XRDP_CFG/xrdp.ini"
 
     log "Starting xrdp on port 3389 (RDP → VNC :${DISPLAY_NUM})..."
-    xrdp --nodaemon --config "$XRDP_CFG/xrdp.ini" >>/var/log/xrdp.log 2>&1 &
+    # Kill any stale xrdp (defunct or running) before binding 3389.
+    pkill -x xrdp 2>/dev/null
+    sleep 0.2
+    # setsid: same TTY-detachment as Xvfb/x11vnc/fluxbox above.
+    # /var/log/xrdp.log: xrdp's traditional log target (read by sysadmins
+    # debugging RDP issues). Stays at /var/log because that path is
+    # documented in xrdp.ini's LogFile setting.
+    setsid $_NIX_ENV xrdp --nodaemon --config "$XRDP_CFG/xrdp.ini" \
+        < /dev/null >> /var/log/xrdp.log 2>&1 &
 
     log "xrdp ready - connect to localhost:${EXT_RDP_PORT:-3389}"
 else

@@ -66,6 +66,16 @@ in {
     url = "https://mcp.linear.app/mcp";
   };
 
+  # Atlassian (Jira + Confluence + Rovo) — remote HTTP MCP server.
+  # Upstream config repo: https://github.com/atlassian/atlassian-mcp-server
+  # Auth: OAuth 2.1 (3LO) on first use — run /mcp in Claude session to authenticate.
+  # Claude-only: opencode/codex/gemini filter to stdio. For those clients, wrap
+  # the URL with `npx -y mcp-remote ...` in a separate stdio entry.
+  devcell.managedMcp.servers."atlassian" = {
+    type = "http";
+    url = "https://mcp.atlassian.com/v1/mcp/authv2";
+  };
+
   # n8n — workflow automation. Talks to a self-hosted or cloud n8n instance via its REST API.
   # Required env vars: N8N_API_URL (e.g. https://n8n.example.com), N8N_API_KEY (instance API key).
   # The \${VAR} escape produces literal ${VAR} in the generated JSON, which Claude expands at spawn time.

@@ -101,6 +101,10 @@ in {
     capstone                    # multi-arch disassembly engine (lib + cstool: cstool x86 …)
     python312Packages.ropper    # ROP gadget finder for exploit dev (use: ropper -f file.exe)
 
+    # forensics & file carving
+    foremost                    # file carving by header/footer signatures (use: foremost -i image.dd -o out/)
+    sleuthkit                   # disk image / filesystem forensics suite (use: fls, icat, mmls, fsstat)
+
     # parameter discovery
     arjun             # HTTP parameter discovery (use: arjun -u https://target.com/endpoint)
 
