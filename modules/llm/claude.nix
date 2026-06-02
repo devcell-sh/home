@@ -65,6 +65,18 @@ in {
         time and copied to ~/.claude/hooks/<name> by entrypoint.sh on start.
       '';
     };
+
+    # Read-only — exposes the generated config derivation so the pure
+    # (nix2container) image builder can stage it directly to /etc/claude-code/
+    # at image-build time. Activation-script-based staging (line ~118 below)
+    # doesn't run on pure images because home-manager activation is skipped.
+    nixMcpConfigFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = if hasServers then claudeConfig else null;
+      internal = true;
+      readOnly = true;
+      description = "Nix-store path of the generated Claude MCP servers JSON (null when no servers declared).";
+    };
   };
 
   config = {

@@ -7,6 +7,7 @@
     ../modules/financial.nix
     ../modules/graphics.nix
     ../modules/llm
+    ../modules/media.nix
     ../modules/mise.nix
     ../modules/news.nix
     ../modules/nixos.nix

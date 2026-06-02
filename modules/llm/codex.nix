@@ -31,6 +31,20 @@
 
   hasServers = mcpCfg.servers != {};
 in {
+  options.devcell.managedCodex = {
+    # Read-only — exposes the generated config derivation so the pure
+    # (nix2container) image builder can stage it directly to /etc/codex/ at
+    # image-build time. Activation-script-based staging (line ~49 below)
+    # doesn't run on pure images because home-manager activation is skipped.
+    nixMcpConfigFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = if hasServers then codexConfig else null;
+      internal = true;
+      readOnly = true;
+      description = "Nix-store path of the generated Codex MCP servers TOML (null when no servers declared).";
+    };
+  };
+
   config = {
     home.packages = [ pkgsEdge.codex ];
 

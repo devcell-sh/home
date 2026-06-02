@@ -37,6 +37,10 @@ in {
 
   home.packages = [
     pkgs.hugo  # static site generator (use: hugo server)
-    slidev     # presentation slides from Markdown (use: slidev)
+    # slidev disabled — its `pnpm -r build` recursively builds the
+    # demo/starter workspace, whose internal `slidev build` SIGHUPs at ~70s in
+    # the nix2container linux-builder VM. Re-enable once buildPhase is filtered
+    # to `pnpm --filter './packages/*' build` (skips demo/ workspaces).
+    # slidev     # presentation slides from Markdown (use: slidev)
   ];
 }

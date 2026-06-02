@@ -50,6 +50,25 @@ in {
         user's existing ~/opencode.json.
       '';
     };
+
+    # Read-only — expose the generated config derivations so the pure
+    # (nix2container) image builder can stage them directly to /etc/opencode/
+    # at image-build time. Activation-script-based staging (line ~85 below)
+    # doesn't run on pure images because home-manager activation is skipped.
+    nixMcpConfigFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = if hasServers then openCodeConfig else null;
+      internal = true;
+      readOnly = true;
+      description = "Nix-store path of the generated OpenCode MCP servers JSON (null when no servers declared).";
+    };
+    nixProvidersFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = if hasProviders then providersFile else null;
+      internal = true;
+      readOnly = true;
+      description = "Nix-store path of the generated OpenCode providers JSON (null when no providers declared).";
+    };
   };
 
   config = {

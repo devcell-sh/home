@@ -5,5 +5,6 @@
     ./claude.nix
     ./opencode.nix
     ./codex.nix
+    ./gemini.nix
   ];
 }
