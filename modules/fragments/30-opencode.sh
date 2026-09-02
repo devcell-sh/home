@@ -18,10 +18,12 @@ merge_opencode_providers() {
     mkdir -p "$(dirname "$target_file")"
 
     if [ ! -f "$target_file" ]; then
-        # No user config yet — seed it from nix providers
+        # No user config yet — seed it from nix providers (+ default model/plugins, if set)
         local temp_file
         temp_file=$(mktemp)
-        jq '{"$schema":"https://opencode.ai/config.json","provider": .provider}' "$nix_file" > "$temp_file"
+        jq '{"$schema":"https://opencode.ai/config.json","provider": .provider}
+            + (if .model then {model: .model} else {} end)
+            + (if .plugin then {plugin: .plugin} else {} end)' "$nix_file" > "$temp_file"
         if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
             mv "$temp_file" "$target_file"
             log "✓ ~/opencode.json created with $(jq '.provider | length' "$target_file") nix provider(s)"
@@ -37,13 +39,30 @@ merge_opencode_providers() {
         return 1
     fi
 
-    # Merge: inject nix providers only where the key is absent in user config
+    # Merge: inject nix providers only where the key is absent in user config.
+    # Same non-destructive rule for "model": only set from nix if the user's
+    # config doesn't already have a default model chosen. Plugins are
+    # appended (not replaced) — dedup by package name, ignoring any
+    # trailing @version and preserving a leading @scope.
     local temp_file
     temp_file=$(mktemp)
     jq -s '
+      def pkgname:
+        if type == "array" then .[0]
+        elif (length > 0 and .[0:1] == "@") then ("@" + (.[1:] | split("@")[0]))
+        else (split("@")[0])
+        end;
       .[0] as $existing |
       .[1].provider as $nix |
-      $existing | .provider = (($nix // {}) + ($existing.provider // {}))
+      .[1].model as $nixModel |
+      .[1].plugin as $nixPlugin |
+      ($existing.plugin // []) as $existingPlugins |
+      ($existingPlugins | map(pkgname)) as $existingNames |
+      (($nixPlugin // []) | map(select((pkgname) as $n | ($existingNames | index($n)) == null))) as $toAdd |
+      $existing
+      | .provider = (($nix // {}) + ($existing.provider // {}))
+      | (if ($existing.model == null) and ($nixModel != null) then .model = $nixModel else . end)
+      | (if ($toAdd | length) > 0 then .plugin = ($existingPlugins + $toAdd) else . end)
     ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
     if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
         mv "$temp_file" "$target_file"
@@ -51,6 +70,15 @@ merge_opencode_providers() {
     else
         rm -f "$temp_file"
         echo "⚠ Failed to merge OpenCode providers — keeping original"
+    fi
+}
+
+_mcp_enabled_json() {
+    local raw="${DEVCELL_MCP_ENABLED:-}"
+    if [ -z "$raw" ]; then
+        echo '[]'
+    else
+        echo "$raw" | tr ',' '\n' | jq -R . | jq -s .
     fi
 }
 
@@ -67,6 +95,24 @@ merge_opencode_mcp() {
 
     local backup_before_merge
     backup_before_merge=$(jq -r '.backupBeforeMerge // true' "$nix_file")
+    local enabled_json
+    enabled_json=$(_mcp_enabled_json 2>/dev/null || echo '[]')
+
+    # Include ALL servers (strip enabled field); disabled state is synced after merge
+    local filtered_file
+    filtered_file=$(mktemp)
+    jq '
+      .mcp = (
+        (.mcp // {}) | to_entries |
+        map({key: .key, value: (.value | del(.enabled))}) |
+        from_entries
+      )
+    ' "$nix_file" > "$filtered_file" 2>/dev/null
+    if ! [ -s "$filtered_file" ] || ! jq empty "$filtered_file" 2>/dev/null; then
+        rm -f "$filtered_file"
+        echo "⚠ Failed to prepare nix MCP servers (OpenCode) — skipping merge"
+        return 1
+    fi
 
     mkdir -p "$(dirname "$target_file")"
 
@@ -74,15 +120,17 @@ merge_opencode_mcp() {
         log "Creating ~/.opencode.json with nix MCP servers"
         local temp_file
         temp_file=$(mktemp)
-        jq '{mcp: (.mcp // {})}' "$nix_file" > "$temp_file"
+        jq '{mcp: (.mcp // {})}' "$filtered_file" > "$temp_file"
         if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
             mv "$temp_file" "$target_file"
             log "✓ ~/.opencode.json created ($(jq '.mcp | length' "$target_file") server(s))"
         else
             rm -f "$temp_file"
             echo "⚠ Failed to create ~/.opencode.json"
+            rm -f "$filtered_file"
             return 1
         fi
+        rm -f "$filtered_file"
         return 0
     fi
 
@@ -92,13 +140,15 @@ merge_opencode_mcp() {
         log "⚠ ~/.opencode.json was corrupt — saved to $(basename "$corrupt_bak"), recreating"
         local temp_file
         temp_file=$(mktemp)
-        jq '{mcp: (.mcp // {})}' "$nix_file" > "$temp_file"
+        jq '{mcp: (.mcp // {})}' "$filtered_file" > "$temp_file"
         if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
             mv "$temp_file" "$target_file"
         else
             rm -f "$temp_file"
+            rm -f "$filtered_file"
             return 1
         fi
+        rm -f "$filtered_file"
         return 0
     fi
 
@@ -119,7 +169,7 @@ merge_opencode_mcp() {
         map(select(.value.command == null or (.value.command[0] == null) or (.value.command[0] | startswith("/opt/devcell/") | not))) |
         from_entries) as $cleaned |
       $existing | .mcp = ($cleaned + ($nix // {}))
-    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
+    ' "$target_file" "$filtered_file" > "$temp_file" 2>/dev/null
     if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
         mv "$temp_file" "$target_file"
         log "✓ MCP servers merged into ~/.opencode.json ($(jq '.mcp | length' "$target_file") total)"
@@ -130,8 +180,10 @@ merge_opencode_mcp() {
             cp "$backup_file" "$target_file"
             echo "✓ Restored from backup"
         fi
+        rm -f "$filtered_file"
         return 1
     fi
+    rm -f "$filtered_file"
 }
 
 # ── Sync nix-managed commands ──
@@ -146,6 +198,34 @@ merge_opencode_providers "$HOME/opencode.json"
 [ -f "$HOME/opencode.json" ] && chown $HOST_USER "$HOME/opencode.json"
 
 merge_opencode_mcp "$HOME/.opencode.json"
+
+# Sync MCP disabled state using mcp-toggle abstraction
+if [ -f "$HOME/.opencode.json" ] && type disableMcp >/dev/null 2>&1; then
+    _nix_oc="/etc/opencode/nix-mcp-servers.json"
+    if [ -f "$_nix_oc" ]; then
+        _el=$(_mcp_enabled_json)
+        _disabled_count=0
+        while IFS= read -r _name; do
+            [ -n "$_name" ] || continue
+            disableMcp opencode "$_name" "$HOME/.opencode.json"
+            _disabled_count=$((_disabled_count + 1))
+        done < <(jq -r --argjson el "$_el" '
+            [(.mcp // {}) | to_entries[] |
+             select(.value.enabled != true and ((.key as $k | $el | index($k)) == null)) |
+             .key][]
+        ' "$_nix_oc")
+        while IFS= read -r _name; do
+            [ -n "$_name" ] || continue
+            enableMcp opencode "$_name" "$HOME/.opencode.json"
+        done < <(jq -r --argjson el "$_el" '
+            [(.mcp // {}) | to_entries[] |
+             select(.value.enabled == true or ((.key as $k | $el | index($k)) != null)) |
+             .key][]
+        ' "$_nix_oc")
+        log "✓ OpenCode MCP disabled state synced ($_disabled_count disabled)"
+    fi
+fi
+
 [ -f "$HOME/.opencode.json" ] && chown $HOST_USER "$HOME/.opencode.json"
 
 notify opencode.ready

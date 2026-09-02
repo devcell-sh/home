@@ -8,6 +8,15 @@
 
 notify gemini.starting
 
+_mcp_enabled_json() {
+    local raw="${DEVCELL_MCP_ENABLED:-}"
+    if [ -z "$raw" ]; then
+        echo '[]'
+    else
+        echo "$raw" | tr ',' '\n' | jq -R . | jq -s .
+    fi
+}
+
 merge_gemini_mcp() {
     local target_file="$1"
     local nix_file="/etc/gemini/nix-mcp-servers.json"
@@ -21,6 +30,25 @@ merge_gemini_mcp() {
 
     local backup_before_merge
     backup_before_merge=$(jq -r '.backupBeforeMerge // true' "$nix_file")
+    local enabled_json
+    enabled_json=$(_mcp_enabled_json)
+
+    # Filter nix servers: keep enabled=true OR named in DEVCELL_MCP_ENABLED, strip enabled field
+    local filtered_file
+    filtered_file=$(mktemp)
+    jq --argjson enabled_list "$enabled_json" '
+      .mcpServers = (
+        (.mcpServers // {}) | to_entries |
+        map(select(.value.enabled == true or (.key as $k | $enabled_list | index($k)) != null)) |
+        map({key: .key, value: (.value | del(.enabled))}) |
+        from_entries
+      )
+    ' "$nix_file" > "$filtered_file" 2>/dev/null
+    if ! [ -s "$filtered_file" ] || ! jq empty "$filtered_file" 2>/dev/null; then
+        rm -f "$filtered_file"
+        echo "⚠ Failed to filter nix MCP servers (Gemini) — skipping merge"
+        return 1
+    fi
 
     mkdir -p "$(dirname "$target_file")"
 
@@ -29,15 +57,17 @@ merge_gemini_mcp() {
         log "Creating ~/.gemini/settings.json with nix MCP servers"
         local temp_file
         temp_file=$(mktemp)
-        jq '{mcpServers: (.mcpServers // {})}' "$nix_file" > "$temp_file"
+        jq '{mcpServers: (.mcpServers // {})}' "$filtered_file" > "$temp_file"
         if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
             mv "$temp_file" "$target_file"
             log "✓ ~/.gemini/settings.json created ($(jq '.mcpServers | length' "$target_file") server(s))"
         else
             rm -f "$temp_file"
             echo "⚠ Failed to create ~/.gemini/settings.json from nix MCP servers"
+            rm -f "$filtered_file"
             return 1
         fi
+        rm -f "$filtered_file"
         return 0
     fi
 
@@ -48,15 +78,17 @@ merge_gemini_mcp() {
         log "⚠ ~/.gemini/settings.json was corrupt — saved to $(basename "$corrupt_bak"), recreating"
         local temp_file
         temp_file=$(mktemp)
-        jq '{mcpServers: (.mcpServers // {})}' "$nix_file" > "$temp_file"
+        jq '{mcpServers: (.mcpServers // {})}' "$filtered_file" > "$temp_file"
         if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
             mv "$temp_file" "$target_file"
             log "✓ ~/.gemini/settings.json recreated"
         else
             rm -f "$temp_file"
             echo "⚠ Failed to recreate ~/.gemini/settings.json"
+            rm -f "$filtered_file"
             return 1
         fi
+        rm -f "$filtered_file"
         return 0
     fi
 
@@ -69,8 +101,7 @@ merge_gemini_mcp() {
         ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
     fi
 
-    # Merge: remove stale nix-managed servers (command starts with /opt/devcell/),
-    # then add current stack's servers. User-defined servers preserved.
+    # Merge: remove stale nix-managed servers, then add filtered servers.
     local temp_file
     temp_file=$(mktemp)
     jq -s '
@@ -80,7 +111,7 @@ merge_gemini_mcp() {
         map(select(.value.command == null or (.value.command | startswith("/opt/devcell/") | not))) |
         from_entries) as $cleaned |
       $existing | .mcpServers = ($cleaned + ($nix // {}))
-    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
+    ' "$target_file" "$filtered_file" > "$temp_file" 2>/dev/null
     if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
         mv "$temp_file" "$target_file"
         log "✓ MCP servers merged into ~/.gemini/settings.json ($(jq '.mcpServers | length' "$target_file") total)"
@@ -91,8 +122,10 @@ merge_gemini_mcp() {
             cp "$backup_file" "$target_file"
             echo "✓ Restored from backup"
         fi
+        rm -f "$filtered_file"
         return 1
     fi
+    rm -f "$filtered_file"
 }
 
 merge_gemini_mcp "$HOME/.gemini/settings.json"
