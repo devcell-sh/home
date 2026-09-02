@@ -194,20 +194,24 @@ if [ -d "$DEVCELL_HOME/.config/opencode/commands" ] && [ -n "$(ls -A "$DEVCELL_H
 fi
 
 # ── Run merges ──
-merge_opencode_providers "$HOME/opencode.json"
-[ -f "$HOME/opencode.json" ] && chown $HOST_USER "$HOME/opencode.json"
+# OpenCode reads global config from ~/.config/opencode/opencode.jsonc (priority)
+# or ~/.config/opencode/opencode.json. Providers, plugins, and MCP all go there
+# so they resolve regardless of CWD.
+_oc_global="$HOME/.config/opencode/opencode.json"
+[ -f "$HOME/.config/opencode/opencode.jsonc" ] && _oc_global="$HOME/.config/opencode/opencode.jsonc"
 
-merge_opencode_mcp "$HOME/.opencode.json"
+merge_opencode_providers "$_oc_global"
+merge_opencode_mcp "$_oc_global"
 
 # Sync MCP disabled state using mcp-toggle abstraction
-if [ -f "$HOME/.opencode.json" ] && type disableMcp >/dev/null 2>&1; then
+if [ -f "$_oc_global" ] && type disableMcp >/dev/null 2>&1; then
     _nix_oc="/etc/opencode/nix-mcp-servers.json"
     if [ -f "$_nix_oc" ]; then
         _el=$(_mcp_enabled_json)
         _disabled_count=0
         while IFS= read -r _name; do
             [ -n "$_name" ] || continue
-            disableMcp opencode "$_name" "$HOME/.opencode.json"
+            disableMcp opencode "$_name" "$_oc_global"
             _disabled_count=$((_disabled_count + 1))
         done < <(jq -r --argjson el "$_el" '
             [(.mcp // {}) | to_entries[] |
@@ -216,7 +220,7 @@ if [ -f "$HOME/.opencode.json" ] && type disableMcp >/dev/null 2>&1; then
         ' "$_nix_oc")
         while IFS= read -r _name; do
             [ -n "$_name" ] || continue
-            enableMcp opencode "$_name" "$HOME/.opencode.json"
+            enableMcp opencode "$_name" "$_oc_global"
         done < <(jq -r --argjson el "$_el" '
             [(.mcp // {}) | to_entries[] |
              select(.value.enabled == true or ((.key as $k | $el | index($k)) != null)) |
@@ -226,6 +230,6 @@ if [ -f "$HOME/.opencode.json" ] && type disableMcp >/dev/null 2>&1; then
     fi
 fi
 
-[ -f "$HOME/.opencode.json" ] && chown $HOST_USER "$HOME/.opencode.json"
+[ -f "$_oc_global" ] && chown $HOST_USER "$_oc_global"
 
 notify opencode.ready
