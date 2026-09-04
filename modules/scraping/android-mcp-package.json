@@ -1,0 +1,8 @@
+{
+  "name": "nix-android-mcp-server",
+  "version": "1.14.4",
+  "private": true,
+  "dependencies": {
+    "@us-all/android-mcp": "1.14.4"
+  }
+}

@@ -1550,15 +1550,41 @@ SHIMEOF
       _SHARE="$(dirname "$(dirname "$_SELF")")/share/patchright"
       _CLEAN_ARGS=()
       _skip=false
+      _ANDROID_MODE=false
       for _a in "$@"; do
         if $_skip; then _skip=false; continue; fi
         case "$_a" in
           --config|--init-script) _skip=true; continue ;;
+          --android) _ANDROID_MODE=true; continue ;;
         esac
         _CLEAN_ARGS+=("$_a")
       done
       set -- "''${_CLEAN_ARGS[@]}"
       _EXTRA_ARGS=()
+
+      # Android mode: connect to Chrome on a physical Android device via CDP.
+      # No stealth init scripts (real device browser, not headless).
+      # Requires: USB debugging enabled, Chrome running on device.
+      if $_ANDROID_MODE; then
+        # Forward Android Chrome's CDP socket to a local TCP port.
+        # Use port 9223 to avoid collision with desktop chromium on 9222.
+        _ADB="${pkgs.android-tools}/bin/adb"
+        if ! "$_ADB" devices 2>/dev/null | grep -q 'device$'; then
+          printf 'patchright-mcp-cell --android: no ADB device found. Enable USB debugging and connect a device.\n' >&2
+          exit 1
+        fi
+        "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote 2>/dev/null || \
+          "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote
+        _CDP_ANDROID="http://127.0.0.1:9223"
+        if ! ${pkgs.curl}/bin/curl -sf --max-time 3 "$_CDP_ANDROID/json/version" >/dev/null 2>&1; then
+          printf 'patchright-mcp-cell --android: Chrome not reachable on device. Open Chrome on the Android device first.\n' >&2
+          "$_ADB" forward --remove tcp:9223 2>/dev/null
+          exit 1
+        fi
+        _OUTPUT_DIR="''${PLAYWRIGHT_MCP_OUTPUT_DIR:-''${USER_WORKING_DIR:-$PWD}/.devcell/playwright-mcp}"
+        mkdir -p "$_OUTPUT_DIR"
+        exec mcp-server-patchright --cdp-endpoint "$_CDP_ANDROID" --output-dir "$_OUTPUT_DIR" "$@"
+      fi
 
       # Generate runtime config with dynamic timezone from $TZ.
       # Merges static nix config with runtime-only contextOptions.
@@ -1886,7 +1912,7 @@ in {
       readOnly = true;
       default = {
         description = "Patchright stealth browser MCP — anti-bot Chromium for Cloudflare/Kasada-grade sites";
-        mcpServers = [ "playwright" ];
+        mcpServers = [ "playwright" "playwright-android" ];
         sizeMb = 700;
       };
     };
@@ -1897,6 +1923,7 @@ in {
       patchrightMcp
       patchrightMcpCell
       chromiumWrapper
+      pkgs.android-tools  # adb: CDP forwarding to Android Chrome for playwright-android
     ];
 
     home.sessionVariables = {
@@ -1919,6 +1946,14 @@ in {
         # from share/patchright/ in the nix profile, which always resolves to
         # the latest generation. This avoids nix store hash pinning in MCP args.
       ];
+    };
+
+    # Android Chrome CDP automation: connect to Chrome on a physical Android
+    # device via ADB port-forwarding. Full DOM/HTML access, no stealth (real
+    # device). adb comes from android-tools in home.packages above.
+    devcell.managedMcp.servers.playwright-android = {
+      command = "${mcpCfg.nixBinPrefix}/patchright-mcp-cell";
+      args = [ "--android" ];
     };
   };
 }

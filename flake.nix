@@ -84,7 +84,7 @@
     # attribute; this attrset mirrors them statically so CLI can read without
     # evaluating the full home-manager module system.
     devcellModules = {
-      android        = { description = "Android dev: ADB+fastboot + app RE toolkit (apktool, jadx, cfr, dex2jar, enjarify, procyon, androguard, apkeep, bundletool, apksigner, apkleaks, apkid, quark-engine, mitmproxy, frida-tools, jnitrace, scrcpy, OTA/boot-image tools) all arch; Android SDK + emulator (x86_64 only)"; mcpServers = []; sizeMb = 2750; };
+      android        = { description = "Android dev: ADB+fastboot + app RE toolkit (apktool, jadx, cfr, dex2jar, enjarify, procyon, androguard, apkeep, bundletool, apksigner, apkleaks, apkid, quark-engine, mitmproxy, frida-tools, jnitrace, scrcpy, OTA/boot-image tools) all arch; Android SDK + emulator (x86_64 only)"; mcpServers = ["android"]; sizeMb = 2750; };
       apple          = { description = "Swift toolchain for CGO and Apple-platform cross-compilation"; mcpServers = []; sizeMb = 900; };
       build          = { description = "C/C++ build toolchain: clang/cmake/make/llvm/lld"; mcpServers = []; sizeMb = 1500; };
       desktop        = { description = "GUI desktop: IceWM/Fluxbox WM, Xvfb display, VNC + RDP servers, PulseAudio, screenshot tools"; mcpServers = []; sizeMb = 1200; };
@@ -102,7 +102,7 @@
       publishing     = { description = "Document publishing: LaTeX + Pandoc + Typst + Marp slides + Biber bibliography"; mcpServers = []; sizeMb = 1700; };
       python         = { description = "Python runtime (mise) + uv fast package manager"; mcpServers = []; sizeMb = 250; };
       qa-tools       = { description = "MailSlurp — create inboxes, read/list/clear emails programmatically for QA"; mcpServers = ["mailslurp"]; sizeMb = 60; };
-      scraping       = { description = "Patchright stealth browser MCP — anti-bot Chromium for Cloudflare/Kasada-grade sites"; mcpServers = ["playwright"]; sizeMb = 700; };
+      scraping       = { description = "Patchright stealth browser MCP — anti-bot Chromium for Cloudflare/Kasada-grade sites; Android Chrome CDP when android module enabled"; mcpServers = ["playwright" "playwright-android"]; sizeMb = 700; };
       security       = { description = "Vuln scanners + fuzzers + recon + RE + forensics (nuclei, nmap, sqlmap, ghidra, ...)"; mcpServers = []; sizeMb = 3500; };
       social         = { description = "Mastodon — post, reply, follow, search, trending, timelines via MCP"; mcpServers = ["mastodon"]; sizeMb = 50; };
       travel         = { description = "Google Maps (geocoding, routing, places) + TripIt (trips, itineraries)"; mcpServers = ["google-maps" "tripit"]; sizeMb = 100; };

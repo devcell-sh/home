@@ -27,8 +27,36 @@
 # smali/baksmali have no standalone package either, but apktool bundles both.
 {pkgs, config, lib, ...}: let
   cfg = config.devcell.modules.android;
+  mcpCfg = config.devcell.managedMcp;
   isX86Linux = pkgs.stdenv.hostPlatform.system == "x86_64-linux";
   isAarch64Linux = pkgs.stdenv.hostPlatform.system == "aarch64-linux";
+
+  # @us-all/android-mcp -- 76-tool ADB-based MCP server for device control,
+  # UI automation, logcat, diagnostics. Pure ADB, no Appium/uiautomator2.
+  androidMcp = pkgs.buildNpmPackage {
+    pname = "android-mcp-server";
+    version = "1.14.4";
+    src = pkgs.runCommandLocal "android-mcp-src" {} ''
+      mkdir -p $out
+      cp ${./scraping/android-mcp-package.json} $out/package.json
+      cp ${./scraping/android-mcp-package-lock.json} $out/package-lock.json
+    '';
+    # Placeholder: replace with real hash from first `nix build` failure.
+    npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    npmPackFlags = [ "--ignore-scripts" ];
+    npmFlags = [ "--ignore-scripts" ];
+    dontNpmBuild = true;
+    nativeBuildInputs = [ pkgs.makeWrapper pkgs.pkg-config ];
+    buildInputs = [ pkgs.vips ];
+
+    postInstall = ''
+      bin="$out/lib/node_modules/nix-android-mcp-server/node_modules/.bin"
+      makeWrapper "$bin/android-mcp" "$out/bin/android-mcp" \
+        --set ANDROID_MCP_ALLOW_WRITE "true" \
+        --set ANDROID_MCP_ALLOW_SHELL "true" \
+        --prefix PATH : "${pkgs.android-tools}/bin"
+    '';
+  };
 
   # apktool for aarch64-linux. nixpkgs' apktool refuses to build here because it
   # puts x86_64-only `aapt` on PATH — but that dependency is unnecessary. The jar
@@ -83,7 +111,9 @@ in {
 
   config = lib.mkIf cfg.enable {
     home.packages =
-      [ pkgs.android-tools ]  # adb + fastboot, compiled from source (all platforms)
+      [ pkgs.android-tools  # adb + fastboot, compiled from source (all platforms)
+        androidMcp           # @us-all/android-mcp: ADB-based MCP server (76 tools)
+      ]
       # Reverse-engineering toolkit — pure Java/Python, works on all platforms
       # including aarch64-linux (Apple Silicon Docker). Different decompiler
       # backends catch what jadx misses.
@@ -148,6 +178,11 @@ in {
     home.sessionVariables = lib.mkIf isX86Linux {
       ANDROID_HOME = "${androidSdk.androidsdk}/libexec/android-sdk";
       ANDROID_SDK_ROOT = "${androidSdk.androidsdk}/libexec/android-sdk";
+    };
+
+    devcell.managedMcp.servers.android = {
+      command = "${mcpCfg.nixBinPrefix}/android-mcp";
+      args = [];
     };
   };
 }
