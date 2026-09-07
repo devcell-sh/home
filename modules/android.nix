@@ -42,7 +42,7 @@
       cp ${./scraping/android-mcp-package-lock.json} $out/package-lock.json
     '';
     # Placeholder: replace with real hash from first `nix build` failure.
-    npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    npmDepsHash = "sha256-r7cCh6b7XFr27EnVyoaA2wCSnvUolMFJmCapON4IHkk=";
     npmPackFlags = [ "--ignore-scripts" ];
     npmFlags = [ "--ignore-scripts" ];
     dontNpmBuild = true;
