@@ -34,31 +34,70 @@
     doCheck = false;
   };
 
-  # gimp-mcp: Python MCP server bridging GIMP 3.2 with AI assistants.
-  # 56 tool commands covering every major GIMP operation.
-  # Source: https://github.com/maorcc/gimp-mcp (119 stars)
+  # gimp-mcp: Python MCP server bridging GIMP 3.0 with AI assistants.
+  # Two components: a GIMP plug-in (opens port 9877 inside GIMP) and an
+  # MCP bridge (stdio server that Claude talks to, forwarding to port 9877).
+  # Source: https://github.com/maorcc/gimp-mcp
+  gimp-mcp-src = pkgs.fetchFromGitHub {
+    owner = "maorcc";
+    repo = "gimp-mcp";
+    rev = "09bfb2d3e5ca8efdc50c8d0b8c9cdf590ce422c6";
+    hash = "sha256-fmsaDarIQJ9buQjsEYjEet1yCPlQp1w7ZYSYoN//LK0=";
+  };
+
   gimp-mcp = pkgs.python3Packages.buildPythonApplication {
     pname = "gimp-mcp";
     version = "0.1.0";
-    src = pkgs.fetchFromGitHub {
-      owner = "maorcc";
-      repo = "gimp-mcp";
-      rev = "09bfb2d3e5ca8efdc50c8d0b8c9cdf590ce422c6";
-      hash = "sha256-fmsaDarIQJ9buQjsEYjEet1yCPlQp1w7ZYSYoN//LK0=";
-    };
+    src = gimp-mcp-src;
     pyproject = true;
     build-system = [pkgs.python3Packages.setuptools];
     dependencies = with pkgs.python3Packages; [
       mcp      # Model Context Protocol SDK
-      fastmcp  # MCP framework
+      fastmcp  # declared by upstream pyproject.toml
     ];
-    # FastMCP >=2.x renamed the constructor kwarg from description to instructions
     postPatch = ''
       substituteInPlace gimp_mcp_server.py \
-        --replace-fail 'description="GIMP' 'instructions="GIMP'
+        --replace-fail 'FastMCP("GimpMCP", description=' 'FastMCP("GimpMCP", instructions='
     '';
     doCheck = false;
   };
+
+  # GIMP 3.0 plug-in: opens the MCP socket server on port 9877 inside GIMP.
+  # Installed to ~/.config/GIMP/3.0/plug-ins/ so GIMP loads it at startup.
+  gimp-mcp-plugin = pkgs.stdenvNoCC.mkDerivation {
+    pname = "gimp-mcp-plugin";
+    version = "0.1.0";
+    src = gimp-mcp-src;
+    installPhase = ''
+      mkdir -p $out/gimp-mcp-plugin
+      cp gimp-mcp-plugin.py $out/gimp-mcp-plugin/gimp-mcp-plugin.py
+      chmod +x $out/gimp-mcp-plugin/gimp-mcp-plugin.py
+    '';
+  };
+
+  # Wrapper: ensures GIMP is running with the MCP plugin before starting
+  # the MCP bridge. Installs the plugin on first run, then launches GIMP
+  # headlessly and calls plug-in-mcp-server to open port 9877.
+  gimp-mcp-wrapper = pkgs.writeShellScript "gimp-mcp-wrapper" ''
+    export DISPLAY=''${DISPLAY:-:99}
+    PLUGIN_DIR="$HOME/.config/GIMP/3.0/plug-ins/gimp-mcp-plugin"
+    mkdir -p "$PLUGIN_DIR"
+    ln -sf "${gimp-mcp-plugin}/gimp-mcp-plugin/gimp-mcp-plugin.py" "$PLUGIN_DIR/gimp-mcp-plugin.py"
+    if ! ${pkgs.netcat-gnu}/bin/netcat -z localhost 9877 2>/dev/null; then
+      ${pkgs.gimp}/bin/gimp --no-interface \
+        --batch-interpreter=python-fu-eval \
+        -b "proc = Gimp.get_pdb().lookup_procedure('plug-in-mcp-server'); config = proc.create_config(); config.set_property('run-mode', Gimp.RunMode.NONINTERACTIVE); proc.run(config)" &
+      for i in $(seq 1 60); do
+        ${pkgs.netcat-gnu}/bin/netcat -z localhost 9877 2>/dev/null && break
+        sleep 0.5
+      done
+      if ! ${pkgs.netcat-gnu}/bin/netcat -z localhost 9877 2>/dev/null; then
+        echo "gimp-mcp: GIMP failed to start MCP server on port 9877" >&2
+        exit 1
+      fi
+    fi
+    exec ${bin}/gimp-mcp-server "$@"
+  '';
 in {
   options.devcell.modules.graphics = {
     enable = lib.mkEnableOption "Draw.io + Inkscape + GIMP + their MCP servers";
@@ -95,7 +134,7 @@ in {
     };
 
     devcell.managedMcp.servers."gimp-mcp" = {
-      command = "${bin}/gimp-mcp-server";
+      command = "${gimp-mcp-wrapper}";
       args = [];
       env = {};
     };
