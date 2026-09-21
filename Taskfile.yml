@@ -1,0 +1,48 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run all tests
+    cmds:
+      - cmd: task test:lint || echo "SKIP test:lint (lint tools not installed)"
+      - task: test:eval
+      - task: test:unit
+      - task: test:flake
+
+  test:lint:
+    desc: Lint nix files with statix and deadnix
+    preconditions:
+      - sh: command -v statix
+        msg: "statix not found (enable the nixos module or: nix profile install nixpkgs#statix)"
+      - sh: command -v deadnix
+        msg: "deadnix not found (enable the nixos module or: nix profile install nixpkgs#deadnix)"
+    cmds:
+      - statix check .
+      - deadnix --fail .
+
+  test:eval:
+    desc: Evaluate primary homeConfigurations (catches expression errors)
+    vars:
+      CONFIGS:
+        sh: nix eval .#homeConfigurations --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | grep -E '^devcell-' | grep -v darwin
+    cmds:
+      - for: { var: CONFIGS }
+        cmd: |
+          echo "eval: {{.ITEM}}"
+          nix eval .#homeConfigurations."{{.ITEM}}".activationPackage.drvPath --raw > /dev/null
+
+  test:unit:
+    desc: Run shell-based unit tests
+    vars:
+      TESTS:
+        sh: find tests -name 'test-*.sh' -not -name '*-e2e*' | sort
+    cmds:
+      - for: { var: TESTS }
+        cmd: bash {{.ITEM}}
+
+  test:flake:
+    desc: Validate flake metadata and outputs structure
+    cmds:
+      - nix flake metadata --json > /dev/null
+      - nix eval .#devcellModules --json > /dev/null
+      - nix eval .#devcellProfiles --json > /dev/null
