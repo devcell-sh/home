@@ -62,6 +62,8 @@
     doCheck = false;
   };
 
+  # GIMP 3.0 plug-in: opens the MCP socket server on port 9877 inside GIMP.
+  # Installed to ~/.config/GIMP/3.0/plug-ins/ so GIMP loads it at startup.
   gimp-mcp-plugin = pkgs.stdenvNoCC.mkDerivation {
     pname = "gimp-mcp-plugin";
     version = "0.1.0";
@@ -73,6 +75,9 @@
     '';
   };
 
+  # Wrapper: ensures GIMP is running with the MCP plugin before starting
+  # the MCP bridge. Installs the plugin on first run, then launches GIMP
+  # headlessly and calls plug-in-mcp-server to open port 9877.
   gimp-mcp-wrapper = pkgs.writeShellScript "gimp-mcp-wrapper" ''
     export DISPLAY=''${DISPLAY:-:99}
     PLUGIN_DIR="$HOME/.config/GIMP/3.0/plug-ins/gimp-mcp-plugin"
