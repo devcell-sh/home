@@ -314,9 +314,12 @@
     #   misses transitive deps.
     #
     # Phase 2 — platformStrictCheck (deep eval):
-    #   NO allowUnsupportedSystem. Forces drvPath evaluation on every package,
-    #   which recursively evaluates all buildInputs/propagatedBuildInputs.
-    #   If a transitive dep doesn't support the target platform, nix throws.
+    #   NO allowUnsupportedSystem. Forces drvPath evaluation of the FULL
+    #   activation closure — home.packages plus every generated config file
+    #   and wrapper script, which recursively evaluates all transitive deps.
+    #   Store paths interpolated outside home.packages (e.g. an MCP wrapper
+    #   referencing ${pkgs.gimp}) are covered too; home.packages alone missed
+    #   those. If anything doesn't support the target platform, nix throws.
     #   Returns package count on success.
     #
     # Usage:
@@ -392,7 +395,7 @@
           ] ++ stacks.devcell-ultimate;
         };
         packages = cfg.config.home.packages;
-      in builtins.deepSeq (map (p: p.drvPath) packages) (builtins.length packages);
+      in builtins.seq cfg.activationPackage.drvPath (builtins.length packages);
     in {
       x86_64-linux = mkStrictCheck "x86_64-linux";
       aarch64-linux = mkStrictCheck "aarch64-linux";
