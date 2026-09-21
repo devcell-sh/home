@@ -13,25 +13,26 @@
 
   json = pkgs.formats.json {};
 
-  # Only stdio servers — Gemini stdio MCP support is the established path.
-  # Skip servers explicitly disabled (enabled = false). Default: enabled.
-  stdioServers = lib.filterAttrs (
-    _: s: (s.type or "stdio") == "stdio" && (s.enabled or true)
+  # All stdio servers — Gemini stdio MCP support is the established path.
+  # Fragments filter at runtime using DEVCELL_MCP_ENABLED env var.
+  allStdioServers = lib.filterAttrs (
+    _: s: ((s.type or "stdio") == "stdio") && ((s ? command) || (s ? url))
   ) mcpCfg.servers;
 
   toGeminiServer = _: s:
     {
       command = s.command;
       args = s.args or [];
+      enabled = s.enabled or false;
     }
     // lib.optionalAttrs ((s.env or {}) != {}) {env = s.env;};
 
   geminiConfig = json.generate "gemini-nix-mcp-servers.json" {
     backupBeforeMerge = mcpCfg.backupBeforeMerge;
-    mcpServers = lib.mapAttrs toGeminiServer stdioServers;
+    mcpServers = lib.mapAttrs toGeminiServer allStdioServers;
   };
 
-  hasServers = stdioServers != {};
+  hasServers = allStdioServers != {};
 in {
   options.devcell.managedGemini = {
     # Read-only — exposes the generated config derivation so the pure
@@ -39,11 +40,11 @@ in {
     # image-build time. Activation-script-based staging (line ~50 below)
     # doesn't run on pure images because home-manager activation is skipped.
     nixMcpConfigFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = if hasServers then geminiConfig else null;
+      type = lib.types.path;
+      default = geminiConfig;
       internal = true;
       readOnly = true;
-      description = "Nix-store path of the generated Gemini MCP servers JSON (null when no servers declared).";
+      description = "Nix-store path of the generated Gemini MCP servers JSON (empty mcpServers when no servers enabled, so the entrypoint cleanup still removes stale /opt/devcell/ entries).";
     };
   };
 
@@ -56,8 +57,9 @@ in {
       source = ../fragments/30-gemini.sh;
     };
 
-    # Stage Gemini MCP config when servers are defined
-    home.activation.setupManagedGemini = lib.mkIf hasServers (
+    # Always stage the MCP servers file (even when empty) so the
+    # entrypoint cleanup removes stale /opt/devcell/ servers on stack switch.
+    home.activation.setupManagedGemini =
       lib.hm.dag.entryAfter ["writeBoundary"] ''
         # /run/wrappers/bin: NixOS keeps the sudo setuid wrapper there only.
         export PATH="/usr/bin:/bin:/run/wrappers/bin:$PATH"
@@ -67,7 +69,6 @@ in {
         else
           echo "setupManagedGemini: sudo not available — skipping /etc/gemini staging"
         fi
-      ''
-    );
+      '';
   };
 }
