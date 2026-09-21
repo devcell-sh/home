@@ -336,16 +336,23 @@ SHIMEOF
   stealthInitScript = pkgs.writeTextFile {
     name = "stealth-init.js";
     text = ''
-      // Patch navigator.webdriver on the PROTOTYPE (instance-level patch doesn't stick
-      // because Chromium defines it on Navigator.prototype, not the instance)
-      Object.defineProperty(Navigator.prototype, 'webdriver', {
-        get: () => undefined,
-        configurable: true
-      });
+      // navigator.webdriver: deliberately NOT overridden. The launch flag
+      // --disable-blink-features=AutomationControlled (config.json) already
+      // makes the native value `false` — identical to a real non-automated
+      // Chrome, with zero lie surface. The previous `get: () => undefined`
+      // override read as a deleted property (real Chrome always has the
+      // property; BrowserScan flags its absence — observed live 2026-09-03),
+      // and any replaced getter is one more descriptor for lie-detectors to
+      // catch. Verified 2026-09-03: with the flag and no override, BrowserScan
+      // reports webdriver=false and its Webdriver tab passes.
 
-      // Ensure chrome.runtime exists -- Chromium may already provide window.chrome
-      // as a non-configurable property (patchright 1.60+, headed mode). Extend
-      // the existing object instead of replacing it.
+      // Align window.chrome with real Chrome -- Chromium may already provide
+      // window.chrome as a non-configurable property (patchright 1.60+,
+      // headed mode). Extend the existing object instead of replacing it.
+      // Real Chrome on ordinary pages exposes app/csi/loadTimes but NOT
+      // chrome.runtime (that only appears on pages that can message an
+      // extension). Fabricating runtime is CreepJS's hasBadChromeRuntime
+      // signal (observed live 2026-09-03), so we deliberately do not add it.
       if (typeof window.chrome === 'undefined') {
         try {
           Object.defineProperty(window, 'chrome', {
@@ -358,8 +365,15 @@ SHIMEOF
           window.chrome = {};
         }
       }
-      if (!window.chrome.runtime) {
-        window.chrome.runtime = { connect: function(){}, sendMessage: function(){} };
+      if (!window.chrome.app) {
+        window.chrome.app = {
+          isInstalled: false,
+          InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+          RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+          getDetails: function getDetails() { return null; },
+          getIsInstalled: function getIsInstalled() { return false; },
+          runningState: function runningState() { return 'cannot_run'; }
+        };
       }
       if (!window.chrome.loadTimes) {
         window.chrome.loadTimes = function() { return {}; };
@@ -369,21 +383,32 @@ SHIMEOF
       }
 
       // --- Fix toString leaks (must be early -- WebGL patching uses _nativeFnNames) ---
+      // Named function expression: member assignment does no name inference,
+      // so an anonymous wrapper would leak .name === "" where real Chrome
+      // reports "toString". On error, rebuild the TypeError with
+      // Error.captureStackTrace so the wrapper's frame (which carries this
+      // init script's source URL) never appears in the stack.
       const origToString = Function.prototype.toString;
       const _nativeFnNames = new WeakMap();
-      Function.prototype.toString = function() {
+      Function.prototype.toString = function toString() {
         const name = _nativeFnNames.get(this);
         if (name !== undefined) return 'function ' + name + '() { [native code] }';
-        return origToString.call(this);
+        try {
+          return origToString.call(this);
+        } catch (e) {
+          const err = new TypeError(e.message);
+          if (Error.captureStackTrace) Error.captureStackTrace(err, Function.prototype.toString);
+          throw err;
+        }
       };
       _nativeFnNames.set(Function.prototype.toString, 'toString');
-      // Register webdriver getter
-      const wdDesc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
-      if (wdDesc && wdDesc.get) _nativeFnNames.set(wdDesc.get, 'get webdriver');
-      // Register chrome.runtime functions
-      if (window.chrome && window.chrome.runtime) {
-        if (window.chrome.runtime.connect) _nativeFnNames.set(window.chrome.runtime.connect, 'connect');
-        if (window.chrome.runtime.sendMessage) _nativeFnNames.set(window.chrome.runtime.sendMessage, 'sendMessage');
+      // Register chrome shim functions
+      if (window.chrome) {
+        if (window.chrome.app) {
+          _nativeFnNames.set(window.chrome.app.getDetails, 'getDetails');
+          _nativeFnNames.set(window.chrome.app.getIsInstalled, 'getIsInstalled');
+          _nativeFnNames.set(window.chrome.app.runningState, 'runningState');
+        }
         if (window.chrome.loadTimes) _nativeFnNames.set(window.chrome.loadTimes, 'loadTimes');
         if (window.chrome.csi) _nativeFnNames.set(window.chrome.csi, 'csi');
       }
@@ -523,12 +548,15 @@ SHIMEOF
       // Proxy-wrapping getContext gets bypassed by CreepJS; prototype patching doesn't.
       // CELL-70: Linux-appropriate WebGL strings. The previous values
       // ('Intel Inc.' / 'Intel Iris OpenGL Engine') are macOS Intel iGPU
-      // strings that contradict the spoofed Linux aarch64 UA — amiunique
-      // scores that combination at 1.22% similarity. Real Chrome on
-      // Linux with software rasterization reports 'Google Inc. (Google)'
-      // as the unmasked vendor and an ANGLE/SwiftShader renderer.
-      const _wglVendor = 'Google Inc. (Google)';
-      const _wglRenderer = 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)';
+      // strings that contradict the spoofed Linux aarch64 UA. The
+      // SwiftShader string tried next was honest but self-defeating:
+      // "SwiftShader" in the renderer is a top headless/datacenter signal
+      // (CreepJS hasSwiftShader, Sannysoft hard FAIL — observed live
+      // 2026-09-03). Present a plausible hardware GPU consistent with the
+      // Linux aarch64 identity instead: Mali via ANGLE-on-Vulkan, the shape
+      // real Chrome reports on ARM SBCs/laptops.
+      const _wglVendor = 'Google Inc. (ARM)';
+      const _wglRenderer = 'ANGLE (ARM, Vulkan 1.3.0 (Mali-G610 (0x0000A867)), armv8 driver)';
       // Intel-realistic parameter overrides (SwiftShader defaults in comments)
       const _wglParams = {
         37445: _wglVendor,   // UNMASKED_VENDOR_WEBGL
@@ -689,7 +717,7 @@ SHIMEOF
         (function() {
           if (typeof WebGLRenderingContext !== 'undefined') {
             // CELL-70: must match main-thread _wglVendor / _wglRenderer above.
-            var params = {37445:'Google Inc. (Google)',37446:'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)',7936:'WebKit',7937:'WebKit WebGL',3379:16384,34076:16384,34024:16384,36183:8};
+            var params = {37445:'Google Inc. (ARM)',37446:'ANGLE (ARM, Vulkan 1.3.0 (Mali-G610 (0x0000A867)), armv8 driver)',7936:'WebKit',7937:'WebKit WebGL',3379:16384,34076:16384,34024:16384,36183:8};
             var params2 = Object.assign({}, params, {7938:'WebGL 2.0 (OpenGL ES 3.0 Chromium)',35724:'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)'});
             function patchGL(P) {
               var orig = P.prototype.getParameter;
@@ -1897,6 +1925,7 @@ in {
       patchrightMcp
       patchrightMcpCell
       chromiumWrapper
+      pkgs.android-tools  # adb: CDP forwarding to Android Chrome for playwright-android MCP
     ];
 
     home.sessionVariables = {
