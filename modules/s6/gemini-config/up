@@ -1,0 +1,68 @@
+#!/bin/sh
+set -e
+
+# gemini-config: merge Gemini CLI MCP servers. Replaces 30-gemini.sh.
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+
+merge_gemini_mcp() {
+    target_file="$1"
+    nix_file="/etc/gemini/nix-mcp-servers.json"
+    [ -f "$nix_file" ] || return 0
+    jq empty "$nix_file" 2>/dev/null || return 1
+
+    backup_before_merge=$(jq -r '.backupBeforeMerge // true' "$nix_file")
+    mkdir -p "$(dirname "$target_file")"
+
+    if [ ! -f "$target_file" ]; then
+        temp_file=$(mktemp)
+        jq '{mcpServers: (.mcpServers // {})}' "$nix_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"; return 1
+        fi
+        return 0
+    fi
+
+    if ! jq empty "$target_file" 2>/dev/null; then
+        corrupt_bak="${target_file}.corrupt-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$corrupt_bak"
+        temp_file=$(mktemp)
+        jq '{mcpServers: (.mcpServers // {})}' "$nix_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"; return 1
+        fi
+        return 0
+    fi
+
+    backup_file=""
+    if [ "$backup_before_merge" = "true" ]; then
+        backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$backup_file"
+        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+    fi
+
+    temp_file=$(mktemp)
+    jq -s '
+      .[0] as $existing |
+      .[1].mcpServers as $nix |
+      (($existing.mcpServers // {}) | to_entries |
+        map(select(.value.command == null or (.value.command | startswith("/opt/devcell/") | not))) |
+        from_entries) as $cleaned |
+      $existing | .mcpServers = ($cleaned + ($nix // {}))
+    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
+    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+        mv "$temp_file" "$target_file"
+    else
+        rm -f "$temp_file"
+        [ -n "$backup_file" ] && [ -f "$backup_file" ] && cp "$backup_file" "$target_file"
+        return 1
+    fi
+}
+
+merge_gemini_mcp "$HOME/.gemini/settings.json"
+[ -d "$HOME/.gemini" ] && chown -R "$HOST_USER" "$HOME/.gemini"

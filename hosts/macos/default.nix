@@ -1,6 +1,9 @@
 # hosts/macos/default.nix — nix-darwin system config for the devcell macOS VM
 # Applied via: nix run nix-darwin -- switch --flake /Volumes/nixhome#<stack>
 { pkgs, ... }: {
+  imports = [
+    ../../modules/s6-darwin-renderer.nix
+  ];
   # Nix daemon settings
   nix.settings = {
     experimental-features = "nix-command flakes";
@@ -38,10 +41,33 @@
       chmod 0440 /etc/sudoers.d/devcell
       echo "granted devcell passwordless sudo"
     fi
+    mkdir -p /etc/s6/services
   '';
 
   # Minimal system packages — user env managed via home-manager
-  environment.systemPackages = [ pkgs.git ];
+  environment.systemPackages = with pkgs; [
+    git
+    s6
+    s6-rc
+    execline
+  ];
+
+  # s6-svscan: supervise the devcell service tree.
+  # Depends on nix volume being mounted (com.devcell.mount-nix runs first via
+  # provisioning). KeepAlive restarts s6-svscan if it dies.
+  launchd.daemons.s6-svscan = {
+    serviceConfig = {
+      Label = "com.devcell.s6-svscan";
+      ProgramArguments = [
+        "${pkgs.s6}/bin/s6-svscan"
+        "/etc/s6/services"
+      ];
+      RunAtLoad = true;
+      KeepAlive = true;
+      StandardOutPath = "/var/log/devcell-s6-svscan.log";
+      StandardErrorPath = "/var/log/devcell-s6-svscan.log";
+    };
+  };
 
   # Required for nix-darwin
   system.stateVersion = 5;

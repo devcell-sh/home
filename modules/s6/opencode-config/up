@@ -1,0 +1,112 @@
+#!/bin/sh
+set -e
+
+# opencode-config: merge OpenCode providers + MCP servers. Replaces 30-opencode.sh.
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+
+merge_opencode_providers() {
+    target_file="$1"
+    nix_file="/etc/opencode/nix-providers.json"
+    [ -f "$nix_file" ] || return 0
+    jq empty "$nix_file" 2>/dev/null || return 1
+    mkdir -p "$(dirname "$target_file")"
+
+    if [ ! -f "$target_file" ]; then
+        temp_file=$(mktemp)
+        jq '{"$schema":"https://opencode.ai/config.json","provider": .provider}' "$nix_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"
+        fi
+        return 0
+    fi
+
+    jq empty "$target_file" 2>/dev/null || return 1
+
+    temp_file=$(mktemp)
+    jq -s '
+      .[0] as $existing |
+      .[1].provider as $nix |
+      $existing | .provider = (($nix // {}) + ($existing.provider // {}))
+    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
+    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+        mv "$temp_file" "$target_file"
+    else
+        rm -f "$temp_file"
+    fi
+}
+
+merge_opencode_mcp() {
+    target_file="$1"
+    nix_file="/etc/opencode/nix-mcp-servers.json"
+    [ -f "$nix_file" ] || return 0
+    jq empty "$nix_file" 2>/dev/null || return 1
+
+    backup_before_merge=$(jq -r '.backupBeforeMerge // true' "$nix_file")
+    mkdir -p "$(dirname "$target_file")"
+
+    if [ ! -f "$target_file" ]; then
+        temp_file=$(mktemp)
+        jq '{mcp: (.mcp // {})}' "$nix_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"; return 1
+        fi
+        return 0
+    fi
+
+    if ! jq empty "$target_file" 2>/dev/null; then
+        corrupt_bak="${target_file}.corrupt-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$corrupt_bak"
+        temp_file=$(mktemp)
+        jq '{mcp: (.mcp // {})}' "$nix_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"; return 1
+        fi
+        return 0
+    fi
+
+    backup_file=""
+    if [ "$backup_before_merge" = "true" ]; then
+        backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$backup_file"
+        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+    fi
+
+    temp_file=$(mktemp)
+    jq -s '
+      .[0] as $existing |
+      .[1].mcp as $nix |
+      (($existing.mcp // {}) | to_entries |
+        map(select(.value.command == null or (.value.command[0] == null) or (.value.command[0] | startswith("/opt/devcell/") | not))) |
+        from_entries) as $cleaned |
+      $existing | .mcp = ($cleaned + ($nix // {}))
+    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
+    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+        mv "$temp_file" "$target_file"
+    else
+        rm -f "$temp_file"
+        [ -n "$backup_file" ] && [ -f "$backup_file" ] && cp "$backup_file" "$target_file"
+        return 1
+    fi
+}
+
+# Sync nix-managed commands
+if [ -d "$DEVCELL_HOME/.config/opencode/commands" ] && [ -n "$(ls -A "$DEVCELL_HOME/.config/opencode/commands" 2>/dev/null)" ]; then
+    mkdir -p "$HOME/.config/opencode/commands"
+    rsync -a "$DEVCELL_HOME/.config/opencode/commands/" "$HOME/.config/opencode/commands/"
+    chown -R "$HOST_USER" "$HOME/.config/opencode/commands" 2>/dev/null || true
+fi
+
+merge_opencode_providers "$HOME/opencode.json"
+[ -f "$HOME/opencode.json" ] && chown "$HOST_USER" "$HOME/opencode.json"
+
+merge_opencode_mcp "$HOME/.opencode.json"
+[ -f "$HOME/.opencode.json" ] && chown "$HOST_USER" "$HOME/.opencode.json"

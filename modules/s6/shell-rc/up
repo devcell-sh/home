@@ -1,0 +1,93 @@
+#!/bin/sh
+set -e
+
+# shell-rc: generate shell rc files for the session user.
+# Runs as root. Replaces 05-shell-rc.sh fragment.
+#
+# Platform-aware: detects DEVCELL_HOME from environment.
+# On Linux: /opt/devcell
+# On macOS: /Users/devcell (nix-darwin home-manager)
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+
+# Nix profile symlink + user-writable profile dir
+mkdir -p "$HOME/.local/state/nix/profiles"
+chown -R "$HOST_USER" "$HOME/.local/state/nix" 2>/dev/null || true
+
+if [ -L "$HOME/.nix-profile" ]; then
+    _tgt=$(readlink "$HOME/.nix-profile")
+    case "$_tgt" in
+        "$HOME"/*) : ;;
+        *) rm -f "$HOME/.nix-profile" ;;
+    esac
+fi
+ln -sfn "$HOME/.local/state/nix/profiles/profile" "$HOME/.nix-profile"
+chown -h "$HOST_USER" "$HOME/.nix-profile" 2>/dev/null || true
+
+# Platform-specific PATH construction
+_os=$(uname -s)
+case "$_os" in
+    Darwin)
+        _nix_profile_bin="/etc/profiles/per-user/devcell/bin:/run/current-system/sw/bin"
+        ;;
+    *)
+        _nix_profile_bin="/opt/devcell/.local/state/nix/profiles/profile/bin"
+        ;;
+esac
+
+overrides() {
+    local sourceCmd="$1"
+    [ -n "$sourceCmd" ] && echo "$sourceCmd"
+    cat <<RCEOF
+# -- devcell session user overrides --
+export USER="$HOST_USER"
+export GOPATH="$HOME/go"
+export MISE_DATA_DIR="$HOME/.local/share/mise"
+export MISE_GLOBAL_CONFIG_FILE="$(readlink -f "$DEVCELL_HOME/.config/mise/config.toml" 2>/dev/null)"
+export MISE_NODE_DEFAULT_PACKAGES_FILE="$(readlink -f "$DEVCELL_HOME/.default-npm-packages" 2>/dev/null)"
+export NIX_CONF_DIR="$DEVCELL_HOME/.config/nix"
+export STARSHIP_CONFIG="$DEVCELL_HOME/.config/starship.toml"
+export FONTCONFIG_PATH="$DEVCELL_HOME/.config/fontconfig"
+export HISTFILE="$HOME/.zsh_history"
+export PATH="$HOME/go/bin:$HOME/.local/state/nix/profiles/profile/bin:$HOME/.local/state/nix/profiles/project/bin:$_nix_profile_bin:$HOME/.local/share/mise/shims\${PATH:+:}\${PATH}"
+RCEOF
+    # NIX_LD_LIBRARY_PATH only on Linux
+    if [ "$_os" != "Darwin" ]; then
+        cat <<'LDEOF'
+_NLD="/opt/devcell/.nix-ld-libs"
+if [ -d "$_NLD" ] && [ -z "${_DEVCELL_NIX_LD_LIBPATH_SET:-}" ]; then
+  export NIX_LD_LIBRARY_PATH="$_NLD${NIX_LD_LIBRARY_PATH:+:}${NIX_LD_LIBRARY_PATH}"
+  export _DEVCELL_NIX_LD_LIBPATH_SET=1
+fi
+LDEOF
+    fi
+}
+
+# Rc files must be real local files: on macOS the session-home setup may have
+# symlinked them to the shared CellHome copies (Linux paths), and writing
+# through the symlink would clobber the other platform's rc files.
+for file in .zshrc .zshenv .profile .bashrc; do
+    [ -L "$HOME/$file" ] && rm -f "$HOME/$file"
+done
+
+# zsh files
+for file in .zshrc .zshenv; do
+    if [ -f "$DEVCELL_HOME/$file" ]; then
+        overrides ". \"$DEVCELL_HOME/$file\"" > "$HOME/$file"
+    else
+        overrides "" > "$HOME/$file"
+    fi
+    chown "$HOST_USER" "$HOME/$file"
+done
+
+# bash/sh login files
+for file in .profile .bashrc; do
+    if [ -f "$DEVCELL_HOME/$file" ]; then
+        overrides ". \"$DEVCELL_HOME/$file\"" > "$HOME/$file"
+    else
+        overrides "" > "$HOME/$file"
+    fi
+    chown "$HOST_USER" "$HOME/$file"
+done

@@ -1,0 +1,85 @@
+#!/bin/sh
+set -e
+
+# mise: runtime version manager setup. Replaces 10-mise.sh fragment.
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+
+command -v mise >/dev/null 2>&1 || exit 0
+
+# Copy .tool-versions to session user home
+if [ -f /etc/devcell/tool-versions ]; then
+    [ -L "$HOME/.tool-versions" ] && rm -f "$HOME/.tool-versions"
+    cp /etc/devcell/tool-versions "$HOME/.tool-versions"
+    chown "$HOST_USER" "$HOME/.tool-versions"
+fi
+
+user_mise="$HOME/.local/share/mise"
+mise_bin="$(command -v mise 2>/dev/null)" || mise_bin="$DEVCELL_HOME/.local/state/nix/profiles/profile/bin/mise"
+
+mkdir -p "$user_mise/installs" "$user_mise/shims"
+
+# Clean cross-tier install symlinks (CELL-85/294)
+cleanup_removed=0
+for tool_dir in "$user_mise/installs"/*; do
+    [ -d "$tool_dir" ] || continue
+    for link in "$tool_dir"/*; do
+        [ -L "$link" ] || continue
+        case "$(readlink "$link")" in
+            /*) ;;
+            *) [ -e "$link" ] && continue ;;
+        esac
+        rm -f "$link"
+        cleanup_removed=1
+    done
+done
+
+for tool_dir in "$user_mise/installs"/*; do
+    [ -d "$tool_dir" ] || continue
+    if [ -z "$(ls -A "$tool_dir" 2>/dev/null)" ]; then
+        cleanup_removed=1
+        break
+    fi
+done
+
+if [ "$cleanup_removed" = 1 ]; then
+    rm -f "$user_mise/.tv-global.sha" "$user_mise/.tv-workspace.sha"
+fi
+
+# Install global tool versions
+if [ -f "$HOME/.tool-versions" ]; then
+    tv_sha=$(sha256sum "$HOME/.tool-versions" 2>/dev/null | cut -d' ' -f1)
+    if [ -f "$user_mise/.tv-global.sha" ] && [ "$(cat "$user_mise/.tv-global.sha" 2>/dev/null)" = "$tv_sha" ]; then
+        : # unchanged, skip
+    else
+        (cd "$HOME" && MISE_DATA_DIR="$user_mise" HOME="$HOME" USER="$HOST_USER" \
+            "$mise_bin" install -y 2>&1) || true
+        chown -R "$HOST_USER" "$user_mise"
+
+        MISE_DATA_DIR="$user_mise" HOME="$HOME" "$mise_bin" reshim 2>&1 || \
+            echo "mise reshim failed" >&2
+
+        [ -d "$HOME/.local/state/mise" ] && chown -R "$HOST_USER" "$HOME/.local/state/mise"
+        [ -d "$HOME/.cache/mise" ] && chown -R "$HOST_USER" "$HOME/.cache/mise"
+
+        echo "$tv_sha" > "$user_mise/.tv-global.sha"
+    fi
+fi
+
+# Install workspace tool versions
+workspace="/${APP_NAME:-}"
+if [ -n "$APP_NAME" ] && [ -f "$workspace/.tool-versions" ]; then
+    ws_sha=$(sha256sum "$workspace/.tool-versions" 2>/dev/null | cut -d' ' -f1)
+    if [ -f "$user_mise/.tv-workspace.sha" ] && [ "$(cat "$user_mise/.tv-workspace.sha" 2>/dev/null)" = "$ws_sha" ]; then
+        : # unchanged, skip
+    else
+        MISE_DATA_DIR="$user_mise" "$mise_bin" trust "$workspace/.tool-versions" 2>/dev/null || true
+        (cd "$workspace" && MISE_DATA_DIR="$user_mise" HOME="$HOME" USER="$HOST_USER" \
+            "$mise_bin" install -y 2>&1) || true
+        chown -R "$HOST_USER" "$user_mise"
+        [ -d "$HOME/.cache/mise" ] && chown -R "$HOST_USER" "$HOME/.cache/mise"
+        echo "$ws_sha" > "$user_mise/.tv-workspace.sha"
+    fi
+fi

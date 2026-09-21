@@ -1,0 +1,153 @@
+#!/bin/sh
+set -e
+
+# codex-config: merge Codex CLI MCP servers. Replaces 30-codex.sh.
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+
+merge_codex_mcp() {
+    target_file="$1"
+    nix_file="/etc/codex/nix-mcp-servers.toml"
+    [ -f "$nix_file" ] || return 0
+    command -v python3 >/dev/null 2>&1 || return 1
+    python3 -c "import tomllib; tomllib.load(open('$nix_file','rb'))" 2>/dev/null || return 1
+
+    backup_before_merge=$(python3 -c "
+import tomllib, sys
+with open('$nix_file', 'rb') as f:
+    d = tomllib.load(f)
+print('true' if d.get('backupBeforeMerge', True) else 'false')
+" 2>/dev/null || echo "true")
+
+    mkdir -p "$(dirname "$target_file")"
+
+    if [ -f "$target_file" ] && ! python3 -c "import tomllib; tomllib.load(open('$target_file','rb'))" 2>/dev/null; then
+        corrupt_bak="${target_file}.corrupt-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$corrupt_bak"
+        rm -f "$target_file"
+    fi
+
+    backup_file=""
+    if [ -f "$target_file" ] && [ "$backup_before_merge" = "true" ]; then
+        backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$backup_file"
+        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+    fi
+
+    temp_file=$(mktemp)
+    python3 - "$nix_file" "$target_file" "$temp_file" 2>/dev/null << 'PYEOF'
+import sys, tomllib, os
+
+nix_path, target_path, temp_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def toml_val(v):
+    if isinstance(v, str):   return f'"{v}"'
+    if isinstance(v, bool):  return 'true' if v else 'false'
+    if isinstance(v, int):   return str(v)
+    if isinstance(v, float): return repr(v)
+    if isinstance(v, list):  return '[' + ', '.join(toml_val(x) for x in v) + ']'
+    raise ValueError(f"unsupported type: {type(v)}")
+
+def write_toml(data, out):
+    skip = {'mcp_servers', 'backupBeforeMerge', 'devcellManagedServers'}
+    for k, v in data.items():
+        if k not in skip and not isinstance(v, dict):
+            out.write(f'{k} = {toml_val(v)}\n')
+    if 'mcp_servers' in data:
+        for srv, sdata in data['mcp_servers'].items():
+            out.write(f'\n[mcp_servers.{srv}]\n')
+            for sk, sv in sdata.items():
+                if not isinstance(sv, dict):
+                    out.write(f'{sk} = {toml_val(sv)}\n')
+            for sk, sv in sdata.items():
+                if isinstance(sv, dict):
+                    out.write(f'\n[mcp_servers.{srv}.{sk}]\n')
+                    for ek, ev in sv.items():
+                        out.write(f'{ek} = {toml_val(ev)}\n')
+    for k, v in data.items():
+        if k not in skip and isinstance(v, dict):
+            out.write(f'\n[{k}]\n')
+            for sk, sv in v.items():
+                if not isinstance(sv, dict):
+                    out.write(f'{sk} = {toml_val(sv)}\n')
+
+with open(nix_path, 'rb') as f:
+    nix = tomllib.load(f)
+try:
+    with open(target_path, 'rb') as f:
+        existing = tomllib.load(f)
+except FileNotFoundError:
+    existing = {}
+
+merged = dict(existing)
+def is_devcell_managed(srv):
+    if not isinstance(srv, dict): return False
+    cmd = srv.get('command')
+    return isinstance(cmd, str) and cmd.startswith('/opt/devcell/')
+
+def resolve_env_value(value):
+    if not isinstance(value, str): return value, True
+    if value.startswith('${') and value.endswith('}') and len(value) > 3:
+        name = value[2:-1]
+        resolved = os.environ.get(name)
+        return resolved, bool(resolved)
+    return value, True
+
+def codex_ready_servers(servers):
+    ready, skipped = {}, []
+    for name, srv in servers.items():
+        if not isinstance(srv, dict):
+            ready[name] = srv
+            continue
+        srv = dict(srv)
+        env = srv.get('env')
+        if isinstance(env, dict):
+            resolved_env, missing = {}, []
+            for key, value in env.items():
+                resolved, ok = resolve_env_value(value)
+                if not ok: missing.append(key)
+                else: resolved_env[key] = resolved
+            if missing:
+                skipped.append((name, missing))
+                continue
+            srv['env'] = resolved_env
+        ready[name] = srv
+    return ready, skipped
+
+managed_names = set(nix.get('devcellManagedServers', []))
+cleaned = {k: v for k, v in existing.get('mcp_servers', {}).items()
+           if k not in managed_names and not is_devcell_managed(v)}
+nix_servers, skipped = codex_ready_servers(nix.get('mcp_servers', {}))
+merged['mcp_servers'] = {**cleaned, **nix_servers}
+
+with open(temp_path, 'w') as f:
+    write_toml(merged, f)
+PYEOF
+
+    if [ $? -eq 0 ] && [ -s "$temp_file" ] && python3 -c "import tomllib; tomllib.load(open('$temp_file','rb'))" 2>/dev/null; then
+        mv "$temp_file" "$target_file"
+    else
+        rm -f "$temp_file"
+        [ -n "$backup_file" ] && [ -f "$backup_file" ] && cp "$backup_file" "$target_file"
+        return 1
+    fi
+}
+
+# Sync nix-managed skills
+if [ -d "$DEVCELL_HOME/.codex/skills" ] && [ -n "$(ls -A "$DEVCELL_HOME/.codex/skills" 2>/dev/null)" ]; then
+    mkdir -p "$HOME/.codex/skills"
+    rsync -a "$DEVCELL_HOME/.codex/skills/" "$HOME/.codex/skills/"
+    chown -R "$HOST_USER" "$HOME/.codex/skills" 2>/dev/null || true
+fi
+
+# Migrate: remove stale oss_provider = "lms"
+config_toml="$HOME/.codex/config.toml"
+if [ -f "$config_toml" ] && grep -q '^oss_provider = "lms"' "$config_toml"; then
+    sed -i '' '/^oss_provider = "lms"/d' "$config_toml" 2>/dev/null || \
+    sed -i '/^oss_provider = "lms"/d' "$config_toml" 2>/dev/null || true
+fi
+
+merge_codex_mcp "$HOME/.codex/config.toml"
+[ -d "$HOME/.codex" ] && chown -R "$HOST_USER" "$HOME/.codex"

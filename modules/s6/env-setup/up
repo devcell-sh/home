@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# env-setup: export NIX_LD_LIBRARY_PATH for non-nix binaries. Linux only.
+# Replaces 06-nix-ldpath.sh.
+
+_NLD="/opt/devcell/.nix-ld-libs"
+if [ -d "$_NLD" ]; then
+    mkdir -p /etc/s6/env
+    echo "$_NLD" > /etc/s6/env/NIX_LD_LIBRARY_PATH
+fi

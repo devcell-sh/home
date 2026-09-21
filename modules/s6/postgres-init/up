@@ -1,0 +1,35 @@
+#!/bin/sh
+set -e
+
+# postgres-init: initialize PostgreSQL data dir. Replaces 40-postgres.sh (init part).
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+
+NIX_BIN="$DEVCELL_HOME/.local/state/nix/profiles/profile/bin"
+PGDATA="$HOME/.local/share/postgresql"
+PGPORT=5432
+
+# Symlink cloudquery config
+if [ -d "$DEVCELL_HOME/.config/cloudquery" ]; then
+    mkdir -p "$HOME/.config"
+    ln -sfT "$DEVCELL_HOME/.config/cloudquery" "$HOME/.config/cloudquery"
+    chown -h "$HOST_USER" "$HOME/.config/cloudquery" 2>/dev/null || true
+fi
+
+# Handle stale PID
+if [ -f "$PGDATA/postmaster.pid" ]; then
+    if ! su - "$HOST_USER" -c "'$NIX_BIN/pg_isready' -p $PGPORT -h /tmp -q" 2>/dev/null; then
+        rm -f "$PGDATA/postmaster.pid"
+    fi
+fi
+
+# Initialize data directory on first run
+if [ ! -f "$PGDATA/PG_VERSION" ]; then
+    mkdir -p "$PGDATA"
+    chown "$HOST_USER" "$PGDATA"
+    su - "$HOST_USER" -c "'$NIX_BIN/initdb' -D '$PGDATA' --auth=trust --no-locale -E UTF8"
+fi
+
+chown -R "$HOST_USER" "$PGDATA"

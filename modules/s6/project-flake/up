@@ -1,0 +1,78 @@
+#!/bin/sh
+set -e
+
+# project-flake: install project-level flake.nix packages (CELL-447).
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+PROJECT_DIR="${WORKSPACE:-}"
+
+[ -z "$PROJECT_DIR" ] && exit 0
+[ -f "$PROJECT_DIR/flake.nix" ] || exit 0
+
+if [ "${DEVCELL_FLAKE_TRUST:-}" != "1" ]; then
+    echo "project-flake: found $PROJECT_DIR/flake.nix but DEVCELL_FLAKE_TRUST not set — skipping" >&2
+    exit 0
+fi
+
+export NIX_CONF_DIR="${NIX_CONF_DIR:-$DEVCELL_HOME/.config/nix}"
+
+FLAKE_CACHE="$HOME/.cache/devcell/project-flake"
+FLAKE_PROFILE="$HOME/.local/state/nix/profiles/project"
+
+mkdir -p "$FLAKE_CACHE"
+chown -R "$HOST_USER" "$HOME/.cache/devcell" 2>/dev/null || true
+
+_flake_hash=$(cat "$PROJECT_DIR/flake.nix" "$PROJECT_DIR/flake.lock" 2>/dev/null | sha256sum | cut -d' ' -f1)
+
+_hash_file="$FLAKE_CACHE/flake.hash"
+if [ -f "$_hash_file" ] && [ "$(cat "$_hash_file" 2>/dev/null)" = "$_flake_hash" ] && [ -d "$FLAKE_PROFILE" ]; then
+    exit 0
+fi
+
+# Platform-specific system detection
+case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64) _system="aarch64-darwin" ;;
+    Darwin-x86_64) _system="x86_64-darwin" ;;
+    Linux-aarch64) _system="aarch64-linux" ;;
+    *) _system="x86_64-linux" ;;
+esac
+
+# Mark project dir as git-safe for the session user
+if command -v git >/dev/null 2>&1; then
+    su - "$HOST_USER" -c "git config --global --add safe.directory '$PROJECT_DIR'" 2>/dev/null || true
+fi
+
+if [ -e "$FLAKE_PROFILE" ]; then
+    rm -f "$FLAKE_PROFILE" "${FLAKE_PROFILE}"-*
+fi
+
+_install_log=$(mktemp)
+_installed=false
+
+if su - "$HOST_USER" -c "nix profile install --profile '$FLAKE_PROFILE' '$PROJECT_DIR#packages.$_system.default'" > "$_install_log" 2>&1; then
+    _installed=true
+elif su - "$HOST_USER" -c "nix profile install --profile '$FLAKE_PROFILE' '$PROJECT_DIR#devShells.$_system.default.inputDerivation'" >> "$_install_log" 2>&1; then
+    _installed=true
+fi
+
+cat "$_install_log" >&2
+rm -f "$_install_log"
+
+if [ "$_installed" = true ]; then
+    echo "$_flake_hash" > "$_hash_file"
+    chown -R "$HOST_USER" "$FLAKE_CACHE" 2>/dev/null || true
+    chown -R "$HOST_USER" "$HOME/.local/state/nix/profiles" 2>/dev/null || true
+
+    _proj_store=$(readlink -f "$FLAKE_PROFILE" 2>/dev/null)
+    if [ -n "$_proj_store" ] && [ -d /nix/var/nix/gcroots/devcell ]; then
+        _proj_hash=$(basename "$_proj_store" | cut -d- -f1)
+        ln -sfT "$_proj_store" "/nix/var/nix/gcroots/devcell/${_proj_hash}-project-profile"
+    fi
+else
+    echo "project-flake: install failed" >&2
+    if [ "${DEVCELL_SKIP_FLAKE:-}" != "1" ]; then
+        exit 1
+    fi
+fi

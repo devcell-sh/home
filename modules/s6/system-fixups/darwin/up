@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+# nix state dirs needed by nix CLI invocations.
+# macOS uses Determinate Nix which handles most of this, but ensure the
+# per-user and gcroot dirs exist for devcell's profile management.
+mkdir -p /nix/var/nix/profiles/per-user \
+         /nix/var/nix/gcroots/per-user \
+         /nix/var/nix/gcroots/auto \
+         /nix/var/nix/gcroots/devcell \
+         /nix/var/nix/gcroots/tmp \
+         /nix/var/nix/daemon-socket \
+         /nix/var/nix/temproots \
+         /nix/var/nix/userpool 2>/dev/null
+
+chmod 1777 \
+    /nix/var/nix/profiles/per-user \
+    /nix/var/nix/gcroots/per-user \
+    /nix/var/nix/temproots \
+    /nix/var/nix/userpool 2>/dev/null || true
+chmod 0755 /nix/var/nix/daemon-socket 2>/dev/null || true

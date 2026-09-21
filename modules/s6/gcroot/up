@@ -1,0 +1,49 @@
+#!/bin/sh
+set -e
+
+# gcroot: stamp GC roots at boot (CELL-332).
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HM_PROFILE=$(readlink -f "$DEVCELL_HOME/.local/state/nix/profiles/profile" 2>/dev/null)
+
+if [ -z "$HM_PROFILE" ] || [ ! -d "$HM_PROFILE" ]; then
+    exit 0
+fi
+
+HM_PROFILE_HASH=$(basename "$HM_PROFILE" | cut -d- -f1)
+HM_GENERATION=$(readlink -f "$DEVCELL_HOME/.local/state/nix/profiles/home-manager" 2>/dev/null)
+
+mkdir -p /nix/var/nix/gcroots/devcell
+
+ln -sfn "$HM_PROFILE" "/nix/var/nix/gcroots/devcell/${HM_PROFILE_HASH}-profile"
+
+if [ -n "$HM_GENERATION" ] && [ -d "$HM_GENERATION" ]; then
+    ln -sfn "$HM_GENERATION" "/nix/var/nix/gcroots/devcell/${HM_PROFILE_HASH}-generation"
+fi
+
+_project_name="${DEVCELL_PROJECT_NAME:-unknown}"
+cat > "/nix/var/nix/gcroots/devcell/${HM_PROFILE_HASH}-meta" <<METAEOF
+project=${_project_name}
+stack=${DEVCELL_STACK:-unknown}
+modules=${DEVCELL_MODULES:-}
+profile=${HM_PROFILE}
+stamped=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+METAEOF
+
+# Drift detection
+_root_count=0
+_hash_list=""
+for _root in /nix/var/nix/gcroots/devcell/*-profile; do
+    [ -L "$_root" ] || continue
+    _h=$(basename "$_root" | sed 's/-profile$//')
+    _root_count=$((_root_count + 1))
+    case " $_hash_list " in
+        *" $_h "*) ;;
+        *) _hash_list="$_hash_list $_h" ;;
+    esac
+done
+_unique_hashes=$(echo "$_hash_list" | wc -w)
+
+if [ "$_unique_hashes" -gt 1 ]; then
+    echo "gcroot: drift detected — $_unique_hashes unique profile hashes across $_root_count roots" >&2
+fi

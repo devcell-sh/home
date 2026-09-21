@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+# homedir: sync repo homedir and set browser env. Replaces 20-homedir.sh.
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+REPO_HOMEDIR="${REPO_HOMEDIR:-}"
+
+export FONTCONFIG_PATH="$DEVCELL_HOME/.config/fontconfig"
+
+if [ -d "$REPO_HOMEDIR" ]; then
+    rsync -a --copy-links --ignore-existing --exclude=.claude \
+        --chown="$HOST_USER" "$REPO_HOMEDIR/" "$HOME/"
+fi

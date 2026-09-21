@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+# wireguard: bring up WireGuard tunnels. Replaces 26-wireguard.sh.
+
+[ "${DEVCELL_WG_ENABLED:-}" = "1" ] || exit 0
+
+for conf in /etc/wireguard/*.conf; do
+    [ -f "$conf" ] || continue
+    iface=$(basename "$conf" .conf)
+    wg-quick up "$iface" 2>&1 || echo "wireguard: failed to bring up $iface" >&2
+done

@@ -1,0 +1,132 @@
+#!/bin/sh
+set -e
+
+# claude-config: merge Claude Code settings and MCP servers. Replaces 30-claude.sh.
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-$HOME}"
+
+merge_claude_settings() {
+    template_file="$1"; target_file="$2"
+    [ -f "$template_file" ] || return 1
+    mkdir -p "$(dirname "$target_file")"
+    if [ ! -f "$target_file" ]; then
+        cp "$template_file" "$target_file"
+        return 0
+    fi
+    backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
+    cp "$target_file" "$backup_file"
+    ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+    temp_file=$(mktemp)
+    if [ "${ANTHROPIC_BASE_URL:-}" = "https://openrouter.ai/api" ]; then
+        jq -s '(.[0] * .[1]) | del(.hooks.PermissionRequest)' \
+            "$target_file" "$template_file" > "$temp_file" 2>/dev/null
+    else
+        jq -s '
+          if .[0].hooks.PermissionRequest then .[0]
+          else .[0] * .[1]
+          end
+        ' "$target_file" "$template_file" > "$temp_file" 2>/dev/null
+    fi
+    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+        mv "$temp_file" "$target_file"
+    else
+        cp "$backup_file" "$target_file"
+        rm -f "$temp_file"
+    fi
+}
+
+merge_claude_nix() {
+    nix_hooks_dir="/etc/claude-code/hooks"
+    nix_settings="/etc/claude-code/nix-settings.json"
+    if [ -d "$nix_hooks_dir" ] && [ -n "$(ls -A "$nix_hooks_dir" 2>/dev/null)" ]; then
+        mkdir -p "$HOME/.claude/hooks"
+        rsync -a --chmod=+x --delete \
+            "$nix_hooks_dir/" "$HOME/.claude/hooks/"
+        chown -R "$HOST_USER" "$HOME/.claude/hooks" 2>/dev/null || true
+    fi
+    if [ -f "$nix_settings" ]; then
+        merge_claude_settings "$nix_settings" "$HOME/.claude/settings.json"
+    fi
+    if [ -d "$DEVCELL_HOME/.claude/commands" ] && [ -n "$(ls -A "$DEVCELL_HOME/.claude/commands" 2>/dev/null)" ]; then
+        mkdir -p "$HOME/.claude/commands"
+        rsync -a "$DEVCELL_HOME/.claude/commands/" "$HOME/.claude/commands/"
+        chown -R "$HOST_USER" "$HOME/.claude/commands" 2>/dev/null || true
+    fi
+}
+
+merge_claude_mcp() {
+    target_file="$1"
+    nix_file="/etc/claude-code/nix-mcp-servers.json"
+    [ -f "$nix_file" ] || return 0
+    jq empty "$nix_file" 2>/dev/null || return 1
+
+    backup_before_merge=$(jq -r '.backupBeforeMerge // true' "$nix_file")
+    mkdir -p "$(dirname "$target_file")"
+
+    if [ ! -f "$target_file" ]; then
+        temp_file=$(mktemp)
+        jq '{mcpServers: (.mcpServers // {})}' "$nix_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"
+            return 1
+        fi
+        return 0
+    fi
+
+    if ! jq empty "$target_file" 2>/dev/null; then
+        corrupt_bak="${target_file}.corrupt-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$corrupt_bak"
+        temp_file=$(mktemp)
+        jq '{mcpServers: (.mcpServers // {})}' "$nix_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"
+            return 1
+        fi
+        return 0
+    fi
+
+    backup_file=""
+    if [ "$backup_before_merge" = "true" ]; then
+        backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$backup_file"
+        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+    fi
+
+    temp_file=$(mktemp)
+    jq -s '
+      .[0] as $existing |
+      .[1].mcpServers as $nix |
+      (($existing.mcpServers // {}) | to_entries |
+        map(select(.value.command == null or (.value.command | startswith("/opt/devcell/") | not))) |
+        from_entries) as $cleaned |
+      $existing | .mcpServers = ($cleaned + ($nix // {}))
+    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
+    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+        mv "$temp_file" "$target_file"
+    else
+        rm -f "$temp_file"
+        [ -n "$backup_file" ] && [ -f "$backup_file" ] && cp "$backup_file" "$target_file"
+        return 1
+    fi
+}
+
+merge_claude_nix
+merge_claude_mcp "$HOME/.claude.json"
+
+# Linear MCP: inject Bearer token auth when LINEAR_API_KEY is set
+if [ -n "${LINEAR_API_KEY:-}" ] && [ -f "$HOME/.claude.json" ]; then
+    _tmp=$(mktemp)
+    jq --arg key "$LINEAR_API_KEY" \
+      '.mcpServers.linear = {type:"http", url:"https://mcp.linear.app/mcp", headers:{Authorization:("Bearer "+$key)}}' \
+      "$HOME/.claude.json" > "$_tmp" 2>/dev/null \
+      && mv "$_tmp" "$HOME/.claude.json" \
+      || rm -f "$_tmp"
+fi
+
+[ -f "$HOME/.claude.json" ] && chown "$HOST_USER" "$HOME/.claude.json"

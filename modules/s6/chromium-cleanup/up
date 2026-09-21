@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+# chromium-cleanup: clear stale Chromium singleton lock files (CELL-74).
+
+HOME="${SESSION_HOME:-$HOME}"
+
+if [ -d "$HOME/.chrome" ]; then
+    find "$HOME/.chrome" -maxdepth 3 \( \
+        -name SingletonLock -o \
+        -name SingletonCookie -o \
+        -name SingletonSocket \
+    \) -delete 2>/dev/null || true
+fi
+
+if [ -d "$HOME/tmp" ]; then
+    find "$HOME/tmp" -maxdepth 1 -type d -name '.org.chromium.Chromium.*' \
+        -exec rm -rf {} + 2>/dev/null || true
+fi
