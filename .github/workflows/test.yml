@@ -15,5 +15,8 @@ jobs:
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
+      - name: Install dev tools
+        run: nix profile install nixpkgs#go-task nixpkgs#statix nixpkgs#deadnix nixpkgs#nixfmt-rfc-style
+
       - name: Run tests
-        run: nix develop --command task test
+        run: task test
