@@ -15,17 +15,17 @@ let
   # Fetches the platform-specific prebuilt binary directly from the npm
   # registry. The npm package ships a Node.js shim that spawns a static
   # musl-linked Rust binary — we skip the shim and install the binary.
-  codexVersion = "0.144.4";
+  codexVersion = "0.155.1";
   codexPlatforms = {
     "aarch64-linux" = {
       triple = "aarch64-unknown-linux-musl";
       url = "https://registry.npmjs.org/@openai/codex/-/codex-${codexVersion}-linux-arm64.tgz";
-      hash = "sha256-OEYcdpzpXnNKQgC7Xnqsi76KgFJgPWSOrkr6omrAZqc=";
+      hash = "sha256-faPnvqbbR1HRuDfwRsnOwIkYrH8FQn3Qtbz2TqbIWWQ=";
     };
     "x86_64-linux" = {
       triple = "x86_64-unknown-linux-musl";
       url = "https://registry.npmjs.org/@openai/codex/-/codex-${codexVersion}-linux-x64.tgz";
-      hash = "sha256-mkpFMU6AtTxHYbgAZ+OmjCMC+akCYFm19U8i3sjzQyM=";
+      hash = "sha256-8RDMzdULC+gTC4T0WzFE6ndcIz8ci9gibabucZ1j0gY=";
     };
   };
   codexPlatform = codexPlatforms.${pkgs.stdenv.hostPlatform.system} or null;
