@@ -129,12 +129,6 @@ except FileNotFoundError:
     nix_providers_file = {}
 
 try:
-    with open(profiles_path, 'rb') as f:
-        nix_profiles_file = tomllib.load(f)
-except FileNotFoundError:
-    nix_profiles_file = {}
-
-try:
     with open(target_path, 'rb') as f:
         existing = tomllib.load(f)
 except FileNotFoundError:
@@ -208,16 +202,10 @@ nix_providers = nix_providers_file.get('model_providers', {})
 if nix_providers:
     merged['model_providers'] = {**existing.get('model_providers', {}), **nix_providers}
 
-# profiles: same non-destructive overlay as model_providers — nix-declared
-# names overwrite same-name existing entries, everything else is untouched.
-nix_profiles = nix_profiles_file.get('profiles', {})
-if nix_profiles:
-    merged['profiles'] = {**existing.get('profiles', {}), **nix_profiles}
-
 with open(temp_path, 'w') as f:
     write_toml(merged, f)
 
-print(f"merged {len(merged.get('mcp_servers', {}))} server(s), {len(nix_providers)} model provider(s), {len(nix_profiles)} profile(s)", file=sys.stderr)
+print(f"merged {len(merged.get('mcp_servers', {}))} server(s), {len(nix_providers)} model provider(s)", file=sys.stderr)
 for name, missing in skipped:
     print(f"skipped {name}: missing {', '.join(missing)}", file=sys.stderr)
 PYEOF

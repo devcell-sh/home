@@ -1,5 +1,18 @@
 # base.nix — utilities present in every stack
-{pkgs, lib, pkgsUnstable, self, ...}: {
+{pkgs, lib, pkgsUnstable, self, ...}:
+let
+  # yt-dlp sites change frequently, so keep this package ahead of the slower
+  # release-channel pin used by the rest of the base environment.
+  ytDlpLatest = pkgs.yt-dlp.overridePythonAttrs (_: rec {
+    version = "2026.08.19";
+    src = pkgs.fetchFromGitHub {
+      owner = "yt-dlp";
+      repo = "yt-dlp";
+      tag = version;
+      hash = "sha256-BM5ZeGTmHq+1xH6G/zsuCtjLgYgfRA11ya0zIHK5p4g=";
+    };
+  });
+in {
   imports = [
     ./shell.nix
     ./llm
@@ -179,6 +192,7 @@
     dnsutils # DNS tools (use: dig, nslookup, host)
     dasel # JSON/TOML/YAML/XML processor with TOML output support
     ffmpeg # media processing
+    ytDlpLatest # audio/video downloader
     git-lfs # git large file storage
     gnupg # GPG encryption
     hurl # HTTP request runner/testing (use: hurl api.hurl)
