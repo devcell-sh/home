@@ -31,30 +31,19 @@ let
     doCheck = false;
   };
 
-  # n8n-mcp: Node MCP server bridging Claude/agents to an n8n workflow-automation instance.
-  # https://github.com/czlonkowski/n8n-mcp
+  # n8n-mcp: lightweight MCP server wrapping the n8n REST API.
+  # https://github.com/leonardsellem/n8n-mcp-server
+  # Replaces czlonkowski/n8n-mcp (1.75G node_modules) with a 200KB API-only wrapper.
   n8nMcp = pkgs.buildNpmPackage {
-    pname = "n8n-mcp";
-    version = "2.47.14";
+    pname = "n8n-mcp-server";
+    version = "0.1.8";
     src = pkgs.fetchFromGitHub {
-      owner = "czlonkowski";
-      repo = "n8n-mcp";
-      rev = "v2.47.14";
-      hash = "sha256-nHuWh3hMkvXnUZQcex5pmxF627UlZwVP01ekTI7QCdI=";
+      owner = "leonardsellem";
+      repo = "n8n-mcp-server";
+      rev = "v0.1.8";
+      hash = "sha256-ddyDhHPGqrOpu5coldF7laLjG3eKlf4gn9FYUltE5xI=";
     };
-    npmDepsHash = "sha256-x/gzRVq7rhnNGNGzG3UU/V4SSwCD0FXspvtx5gLf5iE=";
-    # --legacy-peer-deps: upstream's lockfile has unresolvable peer-dep conflicts
-    # (langchain/langgraph vs langchain/core, huggingface/inference vs langchain/community).
-    # Without it, npm's FOD prefetch silently skips conflicting transitive deps
-    # (e.g. @azure/search-documents) and the offline build phase fails ENOTCACHED.
-    # --ignore-scripts: esbuild's postinstall does a strict version-match against
-    # its native binary; nixpkgs' esbuild version drifts from upstream's pin and
-    # the script throws. The package's own `npm run build` still runs (driven
-    # separately by buildNpmPackage), so TS→JS compilation is unaffected.
-    npmFlags = [
-      "--legacy-peer-deps"
-      "--ignore-scripts"
-    ];
+    npmDepsHash = "sha256-rDNhtRyrNH4Rs7xOlm6nVhOkFMXE1MNKDhgKTH5iIR4=";
     nodejs = pkgs.nodejs_22;
   };
 in
@@ -72,7 +61,7 @@ in
           "linear-server"
           "atlassian"
         ];
-        sizeMb = 250;
+        sizeMb = 50;
       };
     };
   };
@@ -80,7 +69,7 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = [
       hubstaffMcp # Hubstaff MCP server for time tracking (use: hubstaff-mcp)
-      n8nMcp # n8n MCP server for workflow automation (use: n8n-mcp)
+      n8nMcp # n8n MCP server for workflow automation (use: n8n-mcp-server)
     ];
 
     devcell.managedMcp.servers."hubstaff-mcp" = {
@@ -110,7 +99,7 @@ in
     # Required env vars: N8N_API_URL (e.g. https://n8n.example.com), N8N_API_KEY (instance API key).
     # The \${VAR} escape produces literal ${VAR} in the generated JSON, which Claude expands at spawn time.
     devcell.managedMcp.servers."n8n" = {
-      command = "${bin}/n8n-mcp";
+      command = "${bin}/n8n-mcp-server";
       args = [ ];
       env = {
         N8N_API_URL = "\${N8N_API_URL}";
