@@ -24,10 +24,12 @@ in {
   config = {
     # pkgsEdge: shared install dirs (MISE_SHARED_INSTALL_DIRS) need mise
     # ≥2026.3.9 (jdx/mise#8581); nixpkgs stable/unstable lag behind.
-    # doCheck disabled: oci::layer test fails on aarch64-darwin (permission
-    # bits differ on JHFS+/APFS vs ext4 — upstream nixpkgs issue).
+    # Linux: use unmodified package so it hits the binary cache.
+    # Darwin: doCheck disabled (oci::layer test fails on APFS).
     home.packages = [
-      (pkgsEdge.mise.overrideAttrs (old: { doCheck = false; }))
+      (if pkgsEdge.stdenv.hostPlatform.isDarwin
+       then pkgsEdge.mise.overrideAttrs (_: { doCheck = false; })
+       else pkgsEdge.mise)
     ];
 
     # User shims only. Baked tools are resolved natively by mise through
