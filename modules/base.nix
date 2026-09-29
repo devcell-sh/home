@@ -143,6 +143,12 @@ in {
         executable = true;
         source = ./fragments/08-project-flake.sh;
       };
+      # Per-project nix packages from .devcell.toml [packages.nix],
+      # passed via cell.json nix_packages array.
+      ".config/devcell/entrypoint.d/09-nix-packages.sh" = {
+        executable = true;
+        source = ./fragments/09-nix-packages.sh;
+      };
       ".config/devcell/entrypoint.d/20-homedir.sh" = {
         executable = true;
         source = ./fragments/20-homedir.sh;
