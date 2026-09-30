@@ -8,6 +8,12 @@ tasks:
       - task: test:eval
       - task: test:unit
       - task: test:flake
+      - task: test:stacks
+
+  test:stacks:
+    desc: Verify ultimate/bbb package, MCP and image-layer boundaries
+    cmds:
+      - nix eval .#stackChecks --json
 
   test:lint:
     desc: Lint nix files with statix and deadnix

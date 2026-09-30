@@ -6,5 +6,6 @@
     ./opencode.nix
     ./codex.nix
     ./gemini.nix
+    ./antigravity.nix
   ];
 }

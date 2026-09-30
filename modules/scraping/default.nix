@@ -2,9 +2,9 @@
 # Self-contained module: buildNpmPackage, playwright-driver browsers, stealth
 # init script, config JSON, and wrapper script. No dependency on desktop/.
 #
-# Interactive browsing: nix chromium wrapper (--no-sandbox, per-app profile).
-# Automation: Patchright's bundled Chromium (stealth -- no webdriver leak).
-# Do NOT set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH -- it overrides the patched binary.
+# Interactive browsing and automation share the playwright-driver Chromium.
+# Separate launchers supply interactive flags or Patchright's stealth setup.
+# Do NOT set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: keep automation on the bundle.
 {pkgs, lib, config, ...}:
 let
   cfg = config.devcell.modules.scraping;
@@ -1904,7 +1904,8 @@ SHIMEOF
     cp ${networkCaptureInitScript} $out/share/patchright/network-capture-init.js
   '';
 
-  # Interactive chromium wrapper -- reads CHROMIUM_PROFILE_PATH at runtime so each
+  # Interactive chromium wrapper reuses the automation browser, avoiding a
+  # second Chromium distribution. Reads CHROMIUM_PROFILE_PATH at runtime so each
   # container can have an isolated profile even when sharing CELL_HOME.
   # --remote-debugging-port=9222 exposes a CDP endpoint so:
   #   1) Playwright/MCP/CDP clients can attach via connectOverCDP('http://127.0.0.1:9222')
@@ -1918,7 +1919,7 @@ SHIMEOF
     # CELL-62: sweep stale SingletonLock/Cookie/Socket left by a crashed
     # peer (this wrapper and patchright-mcp-cell share the same profile dir).
     ${chromiumSingletonSweep} "$_profile"
-    exec ${pkgs.chromium}/bin/chromium \
+    exec ${browsers}/chromium-${patchrightChromiumRevision}/chrome-linux/chrome \
       --user-data-dir="$_profile" \
       --remote-debugging-port=9222 \
       --remote-debugging-address=127.0.0.1 \
@@ -1955,9 +1956,8 @@ in {
     ];
 
     home.sessionVariables = {
-      # Patchright uses its own bundled Chromium (with webdriver stealth patches).
-      # Do NOT set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH -- it overrides the patched binary.
-      # The interactive chromium wrapper above uses pkgs.chromium for manual browsing.
+      # Both launchers use this browser bundle; Patchright adds its automation
+      # configuration. Do not override PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
       PLAYWRIGHT_BROWSERS_PATH = "${browsers}";
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
     };

@@ -22,7 +22,7 @@ let
     ${optLine (hasPkg "chromium") ''prog "Chromium" chromium chromium --new-window''}
     ${optLine (hasPkg "kicad-small" || hasPkg "kicad") ''prog "KiCad" kicad kicad''}
     separator
-    prog "Kitty" utilities-terminal ${pkgs.kitty}/bin/kitty
+    ${optLine (hasPkg "kitty") ''prog "Kitty" utilities-terminal ${pkgs.kitty}/bin/kitty''}
     prog "XTerm" utilities-terminal ${pkgs.xterm}/bin/xterm
   '';
 

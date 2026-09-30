@@ -1,47 +1,42 @@
-# ultimate.nix — every capability module enabled.
-# Personal-credential MCPs (Plex/TripIt/Hubstaff/Inoreader) ride along inert
-# without their env vars — they exist in claude.json but fail when invoked.
-# CELL-63 (Modules 2.0): ultimate = literally everything in the catalog.
-{
+# General development, browser automation, desktop and graphics.
+# Specialist tools live in bbb; individual modules remain opt-in.
+{lib, pkgs, ...}: {
   imports = [
-    ./fullstack.nix
-    ../modules/any-chat.nix
+    ./dev.nix
+    ../modules/build.nix
+    ../modules/go.nix
+    ../modules/node.nix
+    ../modules/project-management.nix
+    ../modules/python.nix
     ../modules/desktop
-    ../modules/electronics.nix
-    # CELL-293: financial temporarily removed from ultimate — yahoo-finance-mcp
-    # rebuilds from source on every fresh runner (custom github derivation, not
-    # on cache.nixos.org) and its pythonImportsCheck stalls CI on arm64.
     ../modules/graphics.nix
-    ../modules/llm
-    ../modules/media
     ../modules/mise.nix
-    ../modules/news.nix
     ../modules/nixos.nix
-    ../modules/publishing.nix
-    ../modules/security.nix
-    ../modules/shell.nix
-    ../modules/social.nix
-    ../modules/travel.nix
-    ../modules/vm.nix
-    ../modules/wine.nix
-    ../modules/wireguard.nix
   ];
 
-  # Enable every opt-in module imported above (or transitively via fullstack).
-  # fullstack already enables: build, go, apple, infra, node, project-management,
-  # python, qa-tools, scraping.
-  devcell.modules.any-chat.enable = true;
-  devcell.modules.desktop.enable = true;
-  devcell.modules.electronics.enable = true;
-  devcell.modules.graphics.enable = true;
-  devcell.modules.news.enable = true;
-  devcell.modules.nixos.enable = true;
-  devcell.modules.publishing.enable = true;
-  devcell.modules.security.enable = true;
-  devcell.modules.social.enable = true;
-  devcell.modules.travel.enable = true;
-  devcell.modules.vm.enable = true;
-  devcell.modules.wine.enable = true;
-  devcell.modules.wireguard.enable = true;
-  devcell.modules.plex.enable = true;  # from ../modules/media
+  devcell.modules = {
+    build.enable = true;
+    go.enable = true;
+    node.enable = true;
+    project-management.enable = true;
+    python.enable = true;
+    desktop = {
+      enable = true;
+      nativeUi.enable = lib.mkDefault false;
+      rdpClient.enable = lib.mkDefault false;
+      kitty.enable = lib.mkDefault false;
+      wxWidgets.enable = lib.mkDefault false;
+    };
+    graphics = {
+      enable = true;
+      drawio.enable = lib.mkDefault false;
+      inkscape.enable = lib.mkDefault false;
+      gimp.enable = lib.mkDefault false;
+    };
+    nixos.enable = true;
+  };
+
+  home.packages = with pkgs; [
+    poppler-utils # PDF utilities: pdftotext, pdfinfo, pdfimages (use: pdftotext file.pdf -)
+  ];
 }

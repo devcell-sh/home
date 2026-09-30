@@ -76,5 +76,11 @@ in {
       executable = true;
       source = ./fragments/10-mise.sh;
     };
+
+    # ── Entrypoint fragment: [packages.python] / [packages.node] via mise ─────
+    home.file.".config/devcell/entrypoint.d/11-mise-packages.sh" = {
+      executable = true;
+      source = ./fragments/11-mise-packages.sh;
+    };
   };
 }

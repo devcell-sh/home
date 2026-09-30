@@ -221,12 +221,36 @@ sync_claude_mcp_state() {
     log "✓ Claude MCP disabled state synced ($disabled_count disabled, project: $project_id)"
 }
 
+# seed_claude_trust marks the cell's project mount as trusted in
+# ~/.claude.json projects[]. Claude Code keys trust by absolute path and the
+# mount path carries the cell number (/devcell-83, /devcell-84, ...), so
+# without this every new container asks "Is this a project you trust?"
+# again. The user already chose to mount this project into the cell.
+# Leaves a missing or corrupt file alone: merge_claude_mcp owns creation.
+seed_claude_trust() {
+    local claude_json="$1" project_id="$2"
+    [ -f "$claude_json" ] || return 0
+    jq empty "$claude_json" 2>/dev/null || return 0
+    if jq -e --arg pid "$project_id" '.projects[$pid].hasTrustDialogAccepted == true' "$claude_json" >/dev/null 2>&1; then
+        return 0
+    fi
+    local tmp; tmp=$(mktemp)
+    if jq --arg pid "$project_id" '.projects[$pid] = ((.projects[$pid] // {}) + {hasTrustDialogAccepted: true})'         "$claude_json" > "$tmp" 2>/dev/null && [ -s "$tmp" ] && jq empty "$tmp" 2>/dev/null; then
+        mv "$tmp" "$claude_json"
+        log "✓ Claude trust seeded for $project_id"
+    else
+        rm -f "$tmp"
+        log "⚠ Claude trust: failed to update ~/.claude.json"
+    fi
+}
+
 # Run nix hooks/settings merge
 merge_claude_nix
 
 # Merge nix MCP servers into user config + sync disabled state in projects
 merge_claude_mcp "$HOME/.claude.json"
 sync_claude_mcp_state "$HOME/.claude.json"
+seed_claude_trust "$HOME/.claude.json" "/${HOSTNAME#cell-}"
 
 # Linear MCP: inject Bearer token auth when LINEAR_API_KEY is set,
 # overriding the OAuth plugin entry. Falls back to plugin OAuth when unset.

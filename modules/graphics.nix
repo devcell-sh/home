@@ -101,6 +101,21 @@
 in {
   options.devcell.modules.graphics = {
     enable = lib.mkEnableOption "Draw.io + Inkscape + GIMP + their MCP servers";
+    drawio.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include the Electron-based Draw.io desktop exporter";
+    };
+    inkscape.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include Inkscape and its MCP server with the graphics tools";
+    };
+    gimp.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include GIMP and its MCP server with the graphics tools";
+    };
     meta = lib.mkOption {
       type = lib.types.attrs;
       readOnly = true;
@@ -113,19 +128,22 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    home.packages = with pkgs; [
+    home.packages = with pkgs; lib.optionals cfg.inkscape.enable [
       inkscape         # vector graphics editor (use: inkscape)
       inkscape-mcp     # Inkscape MCP server for Claude
+    ] ++ [
       potrace          # bitmap → SVG tracer; ships mkbitmap preprocessor (use: potrace, mkbitmap)
     ]
-    ++ lib.optionals pkgs.stdenv.isLinux [
+    ++ lib.optionals (pkgs.stdenv.isLinux && cfg.gimp.enable) [
       gimp             # GNU Image Manipulation Program 3.2 — GTK/X11, Linux only (use: gimp)
       gimp-mcp         # GIMP MCP server — requires gimp, Linux only
+    ]
+    ++ lib.optionals (pkgs.stdenv.isLinux && cfg.drawio.enable) [
       drawio-headless  # Draw.io headless CLI — Electron, Linux only (use: drawio)
     ];
 
     devcell.managedMcp.servers = lib.mkMerge [
-      {
+      (lib.mkIf cfg.inkscape.enable {
         "inkscape-mcp" = {
           command = "${bin}/inkscape-mcp";
           args = [];
@@ -134,10 +152,10 @@ in {
             INKS_WORKSPACE = "./";
           };
         };
-      }
+      })
       # gimp is Linux-only; the wrapper interpolates ${pkgs.gimp}, which
       # throws on darwin even when home.packages guards the package itself.
-      (lib.mkIf pkgs.stdenv.isLinux {
+      (lib.mkIf (pkgs.stdenv.isLinux && cfg.gimp.enable) {
         "gimp-mcp" = {
           command = "${gimp-mcp-wrapper}";
           args = [];

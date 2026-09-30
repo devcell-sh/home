@@ -76,6 +76,7 @@
       "devcell-fullstack" = [./stacks/fullstack.nix];
       "devcell-electronics" = [./stacks/electronics.nix];
       "devcell-ultimate" = [./stacks/ultimate.nix];
+      "devcell-bbb" = [./stacks/bbb.nix];
     };
 
     # Modules 2.0 catalog — flat metadata keyed by module name (CELL-65).
@@ -84,6 +85,7 @@
     # attribute; this attrset mirrors them statically so CLI can read without
     # evaluating the full home-manager module system.
     devcellModules = {
+      any-chat       = { description = "Call chat-completion providers through MCP"; mcpServers = ["any-chat-completions"]; sizeMb = 50; };
       android        = { description = "Android dev: ADB+fastboot + app RE toolkit (apktool, jadx, cfr, dex2jar, enjarify, procyon, androguard, apkeep, bundletool, apksigner, apkleaks, apkid, quark-engine, mitmproxy, frida-tools, jnitrace, scrcpy, OTA/boot-image tools) all arch; Android SDK + emulator (x86_64 only)"; mcpServers = ["android"]; sizeMb = 2750; };
       apple          = { description = "Swift toolchain for CGO and Apple-platform cross-compilation"; mcpServers = []; sizeMb = 900; };
       build          = { description = "C/C++ build toolchain: clang/cmake/make/llvm/lld"; mcpServers = []; sizeMb = 1500; };
@@ -106,7 +108,9 @@
       security       = { description = "Vuln scanners + fuzzers + recon + RE + forensics (nuclei, nmap, sqlmap, ghidra, ...)"; mcpServers = []; sizeMb = 3500; };
       social         = { description = "Mastodon — post, reply, follow, search, trending, timelines via MCP"; mcpServers = ["mastodon"]; sizeMb = 50; };
       travel         = { description = "Google Maps (geocoding, routing, places) + TripIt (trips, itineraries)"; mcpServers = ["google-maps" "tripit"]; sizeMb = 100; };
+      vm             = { description = "QEMU virtual machines and disk-image tools, PowerShell, swtpm"; mcpServers = []; sizeMb = 800; };
       wine           = { description = "Wine (staging) + winetricks + deps for running Wails3 Windows apps under Wine"; mcpServers = []; sizeMb = 1800; };
+      wireguard      = { description = "WireGuard VPN tunnels with a userspace fallback"; mcpServers = []; sizeMb = 15; };
     };
 
     # Modules 2.0 profiles — named compositions (CELL-63).
@@ -115,11 +119,12 @@
       base = [];
       dev = ["scraping" "infra"];
       ultimate = [
-        # from fullstack
-        "build" "go" "apple" "infra" "node" "project-management" "python" "qa-tools" "scraping"
-        # ultimate additions
-        "desktop" "electronics" "graphics" "news" "nixos"
-        "postgresql" "publishing" "security" "social" "travel" "wine" "plex"
+        "build" "go" "infra" "node" "project-management" "python" "scraping"
+        "desktop" "graphics" "nixos"
+      ];
+      bbb = devcellProfiles.ultimate ++ [
+        "any-chat" "apple" "electronics" "news" "plex" "publishing"
+        "security" "social" "travel" "vm" "wine" "wireguard" "qa-tools"
       ];
     };
 
@@ -272,6 +277,7 @@
     # Individual modules for composing custom stacks in user wrapper flakes:
     #   devcell.lib.mkHome "x86_64-linux" (devcell.stacks.go ++ devcell.modules.electronics)
     modules = {
+      any-chat = [./modules/any-chat.nix];
       android = [./modules/android.nix];
       apple = [./modules/apple.nix];
       base = [./modules/base.nix];
@@ -300,10 +306,14 @@
       shell = [./modules/shell.nix];
       social = [./modules/social.nix];
       travel = [./modules/travel.nix];
+      vm = [./modules/vm.nix];
       wine = [./modules/wine.nix];
+      wireguard = [./modules/wireguard.nix];
     };
 
     homeConfigurations = mkAllConfigs // mkAllVagrantConfigs // mkAllDarwinVMConfigs // mkAllWslConfigs;
+
+    stackChecks = import ./tests/stack-split.nix { flake = self; };
 
     # ── cross-platform compatibility check ────────────────────────────────────
     # Two-phase check, both keyed by eval system (aarch64-linux, aarch64-darwin).
@@ -351,7 +361,7 @@
               home.username = evalUser.username;
               home.homeDirectory = evalUser.homeDirectory;
             }
-          ] ++ stacks.devcell-ultimate;
+          ] ++ stacks.devcell-bbb;
         };
         packages = cfg.config.home.packages;
         check = pkg: {
@@ -392,7 +402,7 @@
               home.username = evalUser.username;
               home.homeDirectory = evalUser.homeDirectory;
             }
-          ] ++ stacks.devcell-ultimate;
+          ] ++ stacks.devcell-bbb;
         };
         packages = cfg.config.home.packages;
       in builtins.seq cfg.activationPackage.drvPath (builtins.length packages);
@@ -523,6 +533,7 @@
         "devcell-python-pure-image" = mkStackImage "python";
         "devcell-fullstack-pure-image" = mkStackImage "fullstack";
         "devcell-ultimate-pure-image" = mkStackImage "ultimate";
+        "devcell-bbb-pure-image" = mkStackImage "bbb";
         # Loader skopeo for the host arch — used by `cell` on the host to
         # `skopeo copy nix:... docker-daemon:...` after the image build.
         "skopeo-nix2container" = (mkN2c hostSystem).skopeo-nix2container;

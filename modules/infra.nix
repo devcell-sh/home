@@ -214,7 +214,6 @@ in {
       awscli2  # AWS CLI v2 (use: aws)
       packer
       terraform-docs
-      terraform-plugin-docs  # generates/validates Terraform provider docs (use: tfplugindocs)
       kubernetes-helm  # Kubernetes package manager (use: helm)
       kubectl  # Kubernetes CLI (use: kubectl) — pair with a read-only kubeconfig (see `cell auth kube`)
       opentofuMcp  # OpenTofu Registry MCP server (use: opentofu-mcp-server)

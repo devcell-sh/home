@@ -4,7 +4,7 @@
 # Reads .devcell/cell.json field "nix_packages" and installs listed packages
 # into a dedicated nix profile. The cell CLI populates this field by merging:
 #   [cell] packages = ["jq"]           — shorthand
-#   [packages.nix] packages = ["grpc"] — consistent with [packages.npm/python]
+#   [packages.nix] packages = ["grpc"] — consistent with [packages.node/python]
 # Both sources are deduplicated into one array.
 #
 # Hash-cached: skips reinstall if the list hasn't changed.

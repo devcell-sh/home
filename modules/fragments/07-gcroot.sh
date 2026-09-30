@@ -69,6 +69,6 @@ if [ "$_unique_hashes" -gt 1 ]; then
         done
         log "gcroot: rebuild all cells with the same flake.lock to converge and reclaim disk"
     else
-        echo "warning: nix config drift detected ($_unique_hashes variants) — run with --debug for details, rebuild to converge"
+        notify gcroot.warn "Nix config drift: $_unique_hashes variants (run with --debug for details, rebuild to converge)"
     fi
 fi

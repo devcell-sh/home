@@ -1,6 +1,5 @@
 # go.nix — Go runtime and toolchain
 # Runtime managed by mise; tooling from nixpkgs.
-# Not in nixpkgs: terraform-plugin-docs (tfplugindocs) → installed from GitHub release in Dockerfile
 {
   pkgs,
   config,

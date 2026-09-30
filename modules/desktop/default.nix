@@ -38,6 +38,26 @@ in
 {
   options.devcell.modules.desktop = {
     enable = lib.mkEnableOption "X11/VNC/RDP desktop environment (Xvfb + PulseAudio)";
+    nativeUi.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include the GTK4/WebKitGTK runtime and development headers for native UI builds such as Wails 3";
+    };
+    rdpClient.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include the FreeRDP client alongside the desktop servers";
+    };
+    kitty.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include the Kitty terminal alongside XTerm";
+    };
+    wxWidgets.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include the wxWidgets native GUI toolkit";
+    };
     windowManager = lib.mkOption {
       type = lib.types.enum [ "icewm" "fluxbox" ];
       default = "icewm";
@@ -114,7 +134,6 @@ in
     # VNC/RDP server stack — used by entrypoint.sh when DEVCELL_GUI_ENABLED=true
     x11vnc # VNC server for X11
     xrdp   # RDP server — gateway to VNC session (entrypoint starts on port 3389)
-    freerdp # RDP client (use: xfreerdp /v:host:3389 /u:user /cert:ignore)
     xorg.xorgserver # X.Org server; provides Xvfb virtual framebuffer
 
     # X11 display utilities
@@ -165,9 +184,13 @@ in
     dbus
     snixembed  # SNI→XEmbed proxy for IceWM tray
 
-    # ── GTK4 / WebKit / Wails 3 build stack ────────────────────────────
-    # Runtime libraries
+    # Package metadata lookup for native builds.
     pkg-config
+  ] ++ lib.optionals modCfg.rdpClient.enable [
+    freerdp # RDP client; the xrdp server remains available independently.
+  ] ++ lib.optionals modCfg.nativeUi.enable [
+    # GTK4 / WebKit / Wails 3 build stack. Other desktop applications keep
+    # their required runtime libraries through their own Nix closures.
     gtk4
     webkitgtk_6_0
     libsoup_3
@@ -191,10 +214,10 @@ in
     xorg.libXcursor.dev
     libxkbcommon.dev
     wayland.dev
-
+  ] ++ lib.optionals modCfg.wxWidgets.enable [
     # wxWidgets GUI toolkit (libwxgtk3.2-1, libwxgtk-webview3.2-1)
     wxGTK32 # wxWidgets 3.2.x; attribute = wxGTK32, pname = "wxwidgets"
-
+  ] ++ [
     # Fonts — required for Chromium and other GUI apps.
     # A real desktop has 50+ fonts. Headless environments with < 10 detectable fonts
     # are flagged by CreepJS and headless-detector. These provide broad coverage.
@@ -257,7 +280,9 @@ in
   fonts.fontconfig.defaultFonts = {
     serif      = [ "IBM Plex Serif"   "Fraunces"     "Noto Color Emoji" ];
     sansSerif  = [ "IBM Plex Sans"    "Inter"        "Noto Color Emoji" ];
-    monospace  = [ "Cascadia Code NF" "Iosevka Term" "JetBrainsMono Nerd Font" ];
+    monospace = lib.optional (builtins.elem pkgs.cascadia-code.name (map (p: p.name) config.home.packages)) "Cascadia Code NF"
+      ++ lib.optional (builtins.elem pkgs.iosevka-bin.name (map (p: p.name) config.home.packages)) "Iosevka Term"
+      ++ [ "JetBrainsMono Nerd Font" ];
     emoji      = [ "Noto Color Emoji" ];
   };
 
@@ -347,7 +372,7 @@ in
           ${optEntry (hasPkg "chromium") "[exec] (Chromium) {chromium --new-window}"}
           ${optEntry (hasPkg "kicad-small" || hasPkg "kicad") "[exec] (KiCad) {kicad}"}
         [end]
-        [exec] (Kitty) {${pkgs.kitty}/bin/kitty}
+        ${optEntry (hasPkg "kitty") "[exec] (Kitty) {${pkgs.kitty}/bin/kitty}"}
         [exec] (XTerm) {${pkgs.xterm}/bin/xterm}
         [separator]
         [exit] (Exit Fluxbox)
@@ -357,7 +382,7 @@ in
 
   # ── Kitty terminal — GPU-accelerated with software fallback ───────────
   programs.kitty = {
-    enable = true;
+    enable = modCfg.kitty.enable;
     font = {
       name = "JetBrainsMono Nerd Font";
       size = 11;

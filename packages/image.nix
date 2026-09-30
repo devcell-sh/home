@@ -486,7 +486,9 @@
   # first non-null match, or null when:
   #   - the attribute is missing from every nixpkgs revision, OR
   #   - accessing it throws (e.g. `pkgs.webkitgtk` → "use attribute with ABI version set").
-  # filterPresent removes the nulls so optional/deprecated packages don't break the build.
+  # Layer hints must never add packages absent from the selected stack.
+  # Transitive dependencies still arrive through each selected root's closure
+  # and copyToRoot; hints only determine how those paths are grouped.
   tryAttrFrom = src: path:
     let result = builtins.tryEval (lib.attrByPath path null src);
     in if result.success && result.value != null then result.value else null;
@@ -500,7 +502,8 @@
   # exists in multiple but you want the unstable/edge variant).
   tryEdge = path: tryAttrFrom pkgsEdge path;
   tryUnstable = path: tryAttrFrom pkgsUnstable path;
-  filterPresent = lib.filter (x: x != null);
+  selectedPackagePaths = map toString homeConfig.config.home.packages;
+  filterPresent = lib.filter (x: x != null && builtins.elem (toString x) selectedPackagePaths);
 
   # ── Layer DAG ───────────────────────────────────────────────────────────────
   # Layer names mirror `nixhome/modules/*` so editing a module correlates to
