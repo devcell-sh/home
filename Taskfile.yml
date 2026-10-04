@@ -52,3 +52,4 @@ tasks:
       - nix flake metadata --json > /dev/null
       - nix eval .#devcellModules --json > /dev/null
       - nix eval .#devcellProfiles --json > /dev/null
+      - nix eval .#devcellCatalog --json > /dev/null

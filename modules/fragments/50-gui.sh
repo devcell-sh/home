@@ -473,7 +473,7 @@ if [ -n "$XRDP_BIN" ]; then
             log "  chansrv socket ready"
             if [ -n "$XRDP_PULSE_MOD" ]; then
                 _PA_RUN="gosu $HOST_USER $_NIX_ENV env PULSE_SERVER=unix:$PULSE_DIR/pulse/native XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-                $_PA_RUN pactl load-module module-xrdp-sink xrdp_socket_path=$XRDP_RUN_DIR 2>/dev/null && {
+                $_PA_RUN pactl load-module module-xrdp-sink xrdp_socket_path=$XRDP_RUN_DIR >/dev/null 2>&1 && {
                     $_PA_RUN pactl set-default-sink xrdp-sink 2>/dev/null || true
                     log "  xrdp-sink loaded and set as default"
                 } || log "  WARNING: failed to load module-xrdp-sink"

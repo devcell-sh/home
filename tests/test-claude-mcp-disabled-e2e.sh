@@ -125,6 +125,18 @@ merge_claude_mcp "$HOME/.claude.json"
 actual=$(jq '.mcpServers | has("old-stale")' "$HOME/.claude.json")
 assert_eq "stale server removed" "false" "$actual"
 
+
+# ── Test 6b: stale /nix/store/ wrapper (e.g. gimp-mcp writeShellScript) removed ──
+echo "Test 6b: stale /nix/store/ wrapper cleanup"
+jq '.mcpServers["gimp-mcp"] = {"command":"/nix/store/abc123-gimp-mcp-wrapper","args":[],"env":{}}
+  | .mcpServers["user-local"] = {"command":"/home/user/bin/my-mcp","args":[]}' \
+    "$HOME/.claude.json" > "$HOME/.claude.json.tmp"
+mv "$HOME/.claude.json.tmp" "$HOME/.claude.json"
+merge_claude_mcp "$HOME/.claude.json"
+actual=$(jq '.mcpServers | has("gimp-mcp")' "$HOME/.claude.json")
+assert_eq "stale /nix/store/ wrapper removed" "false" "$actual"
+actual=$(jq '.mcpServers | has("user-local")' "$HOME/.claude.json")
+assert_eq "user-defined server preserved" "true" "$actual"
 # ── Cleanup ──────────────────────────────────────────────────────────────
 rm -rf /tmp/test-claude-code
 

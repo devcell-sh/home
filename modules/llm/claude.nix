@@ -167,7 +167,7 @@ in {
               .[0] as $existing |
               .[1].mcpServers as $nix |
               (($existing.mcpServers // {}) | to_entries |
-                map(select(.value.command == null or (.value.command | startswith("/opt/devcell/") | not))) |
+                map(select(.value.command == null or (.value.command | (startswith("/opt/devcell/") or startswith("/nix/store/")) | not))) |
                 from_entries) as $cleaned |
               ($nix // {} | to_entries | map({key: .key, value: (.value | del(.enabled))}) | from_entries) as $nixClean |
               $existing | .mcpServers = ($cleaned + $nixClean)

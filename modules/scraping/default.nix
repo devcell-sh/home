@@ -1592,21 +1592,22 @@ SHIMEOF
 
       # Android mode: connect to Chrome on a physical Android device via CDP.
       # No stealth init scripts (real device browser, not headless).
-      # Requires: USB debugging enabled, Chrome running on device.
+      # ANDROID_CDP_ENDPOINT overrides the default local ADB flow for remote devices.
       if $_ANDROID_MODE; then
-        # Forward Android Chrome's CDP socket to a local TCP port.
-        # Use port 9223 to avoid collision with desktop chromium on 9222.
-        _ADB="${pkgs.android-tools}/bin/adb"
-        if ! "$_ADB" devices 2>/dev/null | grep -q 'device$'; then
-          printf 'patchright-mcp-cell --android: no ADB device found. Enable USB debugging and connect a device.\n' >&2
-          exit 1
+        _CDP_ANDROID="''${ANDROID_CDP_ENDPOINT:-}"
+        if [ -z "$_CDP_ANDROID" ]; then
+          _ADB="${pkgs.android-tools}/bin/adb"
+          if ! "$_ADB" devices 2>/dev/null | grep -q 'device$'; then
+            printf 'patchright-mcp-cell --android: no ADB device found. Set ANDROID_CDP_ENDPOINT for remote devices.\n' >&2
+            exit 1
+          fi
+          "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote 2>/dev/null || \
+            "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote
+          _CDP_ANDROID="http://127.0.0.1:9223"
         fi
-        "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote 2>/dev/null || \
-          "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote
-        _CDP_ANDROID="http://127.0.0.1:9223"
         if ! ${pkgs.curl}/bin/curl -sf --max-time 3 "$_CDP_ANDROID/json/version" >/dev/null 2>&1; then
-          printf 'patchright-mcp-cell --android: Chrome not reachable on device. Open Chrome on the Android device first.\n' >&2
-          "$_ADB" forward --remove tcp:9223 2>/dev/null
+          printf 'patchright-mcp-cell --android: Chrome not reachable at %s\n' "$_CDP_ANDROID" >&2
+          [ -z "''${ANDROID_CDP_ENDPOINT:-}" ] && "$_ADB" forward --remove tcp:9223 2>/dev/null
           exit 1
         fi
         _OUTPUT_DIR="''${PLAYWRIGHT_MCP_OUTPUT_DIR:-''${USER_WORKING_DIR:-$PWD}/.devcell/playwright-mcp}"

@@ -267,6 +267,28 @@
     #   nix eval .#devcellProfiles --json  # named compositions
     inherit devcellModules devcellProfiles;
 
+    # Full catalog for publishing on devcell.sh (schema/devcell-sh/home/*.json):
+    # the module metadata above plus, per stack, the modules it enables and
+    # the packages it installs (evaluated for x86_64-linux).
+    # CLI/site generator reads this with: nix eval .#devcellCatalog --json
+    devcellCatalog = let
+      mkStack = mods: let
+        cfg = (mkHome "x86_64-linux" mods).config;
+        # Stacks without any module (core, base) have no devcell.modules option.
+        mods' = cfg.devcell.modules or {};
+      in {
+        modules = builtins.filter (n: mods'.${n}.enable or false) (builtins.attrNames mods');
+        packages = map (p: {
+          name = p.pname or p.name;
+          version = p.version or "";
+        }) cfg.home.packages;
+      };
+    in {
+      modules = devcellModules;
+      profiles = devcellProfiles;
+      stacks = lib.mapAttrs' (name: mods: lib.nameValuePair (lib.removePrefix "devcell-" name) (mkStack mods)) stacks;
+    };
+
     # Expose building blocks so user wrapper flakes can compose custom stacks:
     #   devcell.lib.mkHome "x86_64-linux" [ devcell.stacks.go ]
     lib = { inherit mkHome; };

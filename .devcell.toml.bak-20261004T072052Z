@@ -1,0 +1,98 @@
+# .devcell.toml
+# DevCell project configuration. Optional global defaults at ~/.config/devcell/devcell.toml
+
+[cell]
+# Base stack (one of: base, go, node, python, fullstack, electronics, ultimate)
+stack = "ultimate"
+
+volumes = [
+    "/Users/dmitry/dev/devcell-sh/devcell",
+    "/Users/dmitry/dev/nmd/nixhome"
+]
+#
+# Addon modules (from nixhome/modules/): desktop, electronics, financial,
+# graphics, infra, news, nixos, qa-tools, scraping, travel, go, node, python
+# modules = ["electronics", "desktop"]
+#
+# Timezone (IANA format). If omitted, inherits host $TZ.
+# timezone = "Europe/Prague"
+
+# AI agent configuration — all LLM settings in one place.
+# [llm]
+# Route Claude Code through a local ollama instance (Anthropic API compat).
+# Equivalent to: cell claude --ollama
+# use_ollama = false
+#
+# Project context injected into all AI agents (Claude, Codex, OpenCode).
+# Sits on top of CLAUDE.md and agent-native config files.
+# system_prompt = """
+# This project uses PostgreSQL 16 with pgx/v5.
+# API endpoints follow REST conventions at /api/v2/.
+# """
+
+# Git identity forwarded into the container.
+# If omitted and no GIT_AUTHOR_* env vars are set, ~/.config/git/config is mounted read-only instead.
+# [git]
+# author_name = "Your Name"
+# author_email = "you@example.com"
+# committer_name = "Your Name"   # defaults to author_name if omitted
+# committer_email = "you@example.com"  # defaults to author_email if omitted
+
+# 1Password documents whose fields are passed into the container as env vars.
+# Requires `op` CLI on the host. Each field in the document becomes an env var:
+# e.g. a field labeled "API_KEY" with value "sk-123" → env var API_KEY=sk-123.
+# [op]
+# documents = ["prod-api-keys", "dev-secrets"]
+
+# AWS credential scoping. When true, credentials are scoped to read-only
+# via IAM session policy. All AWS tools (cli, terraform, SDKs, MCP servers)
+# get read-only creds. Default: false (full access).
+# [aws]
+# read_only = true
+
+# GUI desktop (Xvfb + VNC + window manager). Enabled by default.
+# [gui]
+# enabled = true
+# wm = "icewm"   # or "fluxbox"
+
+# Port forwarding from container to host. Bare port = same on both sides.
+# [ports]
+# forward = ["3000", "8080:3000"]
+
+# Extra environment variables forwarded into the container.
+[env]
+# GITHUB_TOKEN = "ghp_xxx"
+# ANTHROPIC_API_KEY = "sk-ant-xxx"
+
+# mise runtime settings forwarded as MISE_<UPPER_KEY> env vars.
+# See: https://mise.jdx.dev/configuration.html
+[mise]
+# trusted_config_paths = "/"
+# idiomatic_version_file = "true"
+
+# Extra volume mounts appended to docker run.
+[[volumes]]
+mount = "/Users/dmitry/dev/devcell-sh/home-old/"
+
+
+# [[volumes]]
+# mount = "~/.ssh:/home/user/.ssh:ro"
+
+[llm.models]
+default = "ollama/glm-4.7-flash:latest"
+
+[llm.models.providers.ollama]
+models = ["glm-4.7-flash:latest", "qwen3.6:27b"]
+
+
+# npm packages installed in the container. Edit and run 'cell build'.
+# All core tools (claude-code, codex, slidev, patchright, opentofu-mcp) are
+# managed via nix modules. Only add packages here that are NOT in nixhome.
+# [packages.npm]
+# "some-tool" = "^1.0.0"
+
+# Python packages installed in the container. Edit and run 'cell build'.
+[packages.python]
+"pre-commit" = "*"
+# "httpie" = "*"
+# "pipx" = "*"

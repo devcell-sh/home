@@ -140,7 +140,7 @@ def is_devcell_managed(srv):
         return False
     cmd = srv.get('command')
     return (
-        isinstance(cmd, str) and cmd.startswith('/opt/devcell/')
+        isinstance(cmd, str) and cmd.startswith(('/opt/devcell/', '/nix/store/'))
     )
 
 def resolve_env_value(value):

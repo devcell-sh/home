@@ -108,7 +108,7 @@ merge_gemini_mcp() {
       .[0] as $existing |
       .[1].mcpServers as $nix |
       (($existing.mcpServers // {}) | to_entries |
-        map(select(.value.command == null or (.value.command | startswith("/opt/devcell/") | not))) |
+        map(select(.value.command == null or (.value.command | (startswith("/opt/devcell/") or startswith("/nix/store/")) | not))) |
         from_entries) as $cleaned |
       $existing | .mcpServers = ($cleaned + ($nix // {}))
     ' "$target_file" "$filtered_file" > "$temp_file" 2>/dev/null

@@ -166,7 +166,7 @@ merge_opencode_mcp() {
       .[0] as $existing |
       .[1].mcp as $nix |
       (($existing.mcp // {}) | to_entries |
-        map(select(.value.command == null or (.value.command[0] == null) or (.value.command[0] | startswith("/opt/devcell/") | not))) |
+        map(select(.value.command == null or (.value.command[0] == null) or (.value.command[0] | (startswith("/opt/devcell/") or startswith("/nix/store/")) | not))) |
         from_entries) as $cleaned |
       $existing | .mcp = ($cleaned + ($nix // {}))
     ' "$target_file" "$filtered_file" > "$temp_file" 2>/dev/null
