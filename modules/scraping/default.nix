@@ -1578,42 +1578,15 @@ SHIMEOF
       _SHARE="$(dirname "$(dirname "$_SELF")")/share/patchright"
       _CLEAN_ARGS=()
       _skip=false
-      _ANDROID_MODE=false
       for _a in "$@"; do
         if $_skip; then _skip=false; continue; fi
         case "$_a" in
           --config|--init-script) _skip=true; continue ;;
-          --android) _ANDROID_MODE=true; continue ;;
         esac
         _CLEAN_ARGS+=("$_a")
       done
       set -- "''${_CLEAN_ARGS[@]}"
       _EXTRA_ARGS=()
-
-      # Android mode: connect to Chrome on a physical Android device via CDP.
-      # No stealth init scripts (real device browser, not headless).
-      # ANDROID_CDP_ENDPOINT overrides the default local ADB flow for remote devices.
-      if $_ANDROID_MODE; then
-        _CDP_ANDROID="''${ANDROID_CDP_ENDPOINT:-}"
-        if [ -z "$_CDP_ANDROID" ]; then
-          _ADB="${pkgs.android-tools}/bin/adb"
-          if ! "$_ADB" devices 2>/dev/null | grep -q 'device$'; then
-            printf 'patchright-mcp-cell --android: no ADB device found. Set ANDROID_CDP_ENDPOINT for remote devices.\n' >&2
-            exit 1
-          fi
-          "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote 2>/dev/null || \
-            "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote
-          _CDP_ANDROID="http://127.0.0.1:9223"
-        fi
-        if ! ${pkgs.curl}/bin/curl -sfL --max-time 5 "$_CDP_ANDROID/json/version" >/dev/null 2>&1; then
-          printf 'patchright-mcp-cell --android: Chrome not reachable at %s\n' "$_CDP_ANDROID" >&2
-          [ -z "''${ANDROID_CDP_ENDPOINT:-}" ] && "$_ADB" forward --remove tcp:9223 2>/dev/null
-          exit 1
-        fi
-        _OUTPUT_DIR="''${PLAYWRIGHT_MCP_OUTPUT_DIR:-''${USER_WORKING_DIR:-$PWD}/.devcell/playwright-mcp}"
-        mkdir -p "$_OUTPUT_DIR"
-        exec mcp-server-patchright --cdp-endpoint "$_CDP_ANDROID" --output-dir "$_OUTPUT_DIR" "$@"
-      fi
 
       # Generate runtime config with dynamic timezone from $TZ.
       # Merges static nix config with runtime-only contextOptions.
@@ -1977,14 +1950,15 @@ in {
       ];
     };
 
-    # Android Chrome CDP automation: connect to Chrome on a physical Android
-    # device via ADB port-forwarding. Full DOM/HTML access, no stealth (real
-    # device). adb comes from android-tools in home.packages above.
+    # Android Chrome CDP automation: connect to a remote CDP endpoint
+    # (e.g. api-proxy). No wrapper needed: patchright-mcp reads
+    # PLAYWRIGHT_MCP_CDP_ENDPOINT and PLAYWRIGHT_MCP_CDP_HEADERS natively.
     devcell.managedMcp.servers.playwright-android = {
-      command = "${mcpCfg.nixBinPrefix}/patchright-mcp-cell";
-      args = [ "--android" ];
+      command = "${mcpCfg.nixBinPrefix}/mcp-server-patchright";
+      args = [];
       env = {
-        ANDROID_CDP_ENDPOINT = "\${ANDROID_CDP_ENDPOINT}";
+        PLAYWRIGHT_MCP_CDP_ENDPOINT = "\${PLAYWRIGHT_MCP_CDP_ENDPOINT}";
+        PLAYWRIGHT_MCP_CDP_HEADERS = "\${PLAYWRIGHT_MCP_CDP_HEADERS}";
       };
     };
   };
