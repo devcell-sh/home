@@ -1605,7 +1605,7 @@ SHIMEOF
             "$_ADB" forward tcp:9223 localabstract:chrome_devtools_remote
           _CDP_ANDROID="http://127.0.0.1:9223"
         fi
-        if ! ${pkgs.curl}/bin/curl -sf --max-time 3 "$_CDP_ANDROID/json/version" >/dev/null 2>&1; then
+        if ! ${pkgs.curl}/bin/curl -sfL --max-time 5 "$_CDP_ANDROID/json/version" >/dev/null 2>&1; then
           printf 'patchright-mcp-cell --android: Chrome not reachable at %s\n' "$_CDP_ANDROID" >&2
           [ -z "''${ANDROID_CDP_ENDPOINT:-}" ] && "$_ADB" forward --remove tcp:9223 2>/dev/null
           exit 1
@@ -1983,6 +1983,9 @@ in {
     devcell.managedMcp.servers.playwright-android = {
       command = "${mcpCfg.nixBinPrefix}/patchright-mcp-cell";
       args = [ "--android" ];
+      env = {
+        ANDROID_CDP_ENDPOINT = "\${ANDROID_CDP_ENDPOINT}";
+      };
     };
   };
 }
