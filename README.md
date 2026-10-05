@@ -42,6 +42,22 @@ extension and CDP flags; it no longer adds a separate `pkgs.chromium` distributi
 The current pinned bundle reports Chromium 141; the previous interactive build
 reported 149. Browser version updates now need to update the shared bundle.
 
+The `playwright-android` MCP server connects to Android Chrome via CDP for
+mobile browser automation. It uses bare `mcp-server-patchright` with two
+env vars that patchright reads natively:
+
+```sh
+# CDP endpoint (e.g. a remote proxy or local ADB forward)
+export PLAYWRIGHT_MCP_CDP_ENDPOINT="https://api-proxy.example.com/android/cdp"
+
+# Auth headers for the CDP connection (optional)
+export PLAYWRIGHT_MCP_CDP_HEADERS="X-API-Key: your-key-here"
+```
+
+For local ADB devices, forward the port manually and point the endpoint at
+localhost: `adb forward tcp:9223 localabstract:chrome_devtools_remote` then
+`PLAYWRIGHT_MCP_CDP_ENDPOINT=http://127.0.0.1:9223`.
+
 The stack split changes future builds; it does not clean the shared Nix store
 or alter running containers. `task test:stacks` checks package/MCP boundaries,
 all stack variants, and that OCI layer hints cannot add unselected packages.

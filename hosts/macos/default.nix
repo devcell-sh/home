@@ -41,6 +41,8 @@
       chmod 0440 /etc/sudoers.d/devcell
       echo "granted devcell passwordless sudo"
     fi
+    # Set devcell password for ARD Screen Sharing authentication.
+    dscl . -passwd /Users/devcell admin 2>/dev/null || true
     mkdir -p /etc/s6/services
   '';
 
@@ -68,6 +70,16 @@
       StandardErrorPath = "/var/log/devcell-s6-svscan.log";
     };
   };
+
+  # Enable macOS Screen Sharing via ARD auth (username/password).
+  # Uses the devcell user's macOS credentials (set in preActivation).
+  # Works with macOS Screen Sharing and Royal TSX.
+  system.activationScripts.postActivation.text = ''
+    /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+      -activate -configure -access -on \
+      -restart -agent -privs -all \
+      -allowAccessFor -allUsers 2>/dev/null || true
+  '';
 
   # Required for nix-darwin
   system.stateVersion = 5;

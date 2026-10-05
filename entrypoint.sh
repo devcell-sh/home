@@ -186,27 +186,61 @@ METAEOF
 fi
 
 # Second visible signal: pre-fragment bootstrap done (user/dotfiles/GPG/etc.
-# are wired up). The fragment loop is about to start running real work.
+# are wired up). The s6/fragment activation is about to start.
 notify entrypoint.ready
 
-# ── Source entrypoint fragments (nix-generated) ──────────────────────────────
-# Modules drop shell scripts into /etc/devcell/entrypoint.d/ via home-manager.
-# Each fragment guards its own preconditions (e.g. DEVCELL_GUI_ENABLED).
+# ── s6 session activation ────────────────────────────────────────────────────
+# s6 oneshot services replace entrypoint fragments. Each service in
+# /etc/s6/services/ with type=oneshot and an executable `up` script is run.
+# Env vars are written to /etc/s6/env/ (s6 envdir format) so service scripts
+# can read them via `s6-envdir /etc/s6/env`.
+S6_ENV="/etc/s6/env"
+S6_SVC="/etc/s6/services"
+S6_ACTIVATED=false
+
+if [ -d "$S6_SVC" ] && [ "$(ls -A "$S6_SVC" 2>/dev/null)" ]; then
+    log "s6: writing envdir to $S6_ENV"
+    mkdir -p "$S6_ENV"
+    echo "$HOST_USER" > "$S6_ENV/HOST_USER"
+    echo "$HOME" > "$S6_ENV/SESSION_HOME"
+    echo "$DEVCELL_HOME" > "$S6_ENV/DEVCELL_HOME"
+
+    log "s6: activating session services for $HOST_USER"
+    for svc in "$S6_SVC"/*/; do
+        svc_name=$(basename "$svc")
+        [ -d "$svc" ] || continue
+        [ -f "$svc/type" ] || continue
+        [ "$(cat "$svc/type")" = "oneshot" ] || continue
+        [ -x "$svc/up" ] || continue
+        notify "${svc_name}.starting"
+        log "s6: running $svc_name"
+        "$svc/up" 2>&1 || log "⚠ s6: $svc_name failed (exit $?, non-fatal)"
+        notify "${svc_name}.ready"
+    done
+    touch /run/devcell-session-ready
+    log "s6: session services activated"
+    S6_ACTIVATED=true
+fi
+
+# ── Source entrypoint fragments (DEPRECATED) ─────────────────────────────────
+# Fragments are deprecated in favour of s6 oneshot services. New functionality
+# should be added as s6 services in modules/s6/, not as fragments.
 #
-# Fragment numbering convention:
-#   05-* — shell rc + nix profile setup
-#   10-* — runtime setup (mise)
-#   20-* — home directory setup (homedir, browser env)
-#   30-* — tool config merges (claude, opencode, codex)
-#   50-* — services (GUI, xrdp)
+# Fragments still run for backward compatibility: images built before the s6
+# renderer was added have no /etc/s6/services, and some fragments don't have
+# s6 equivalents yet. Once all fragments are migrated, this loop will be
+# removed.
 if [ -d /etc/devcell/entrypoint.d ]; then
+    if [ "$S6_ACTIVATED" = "true" ]; then
+        log "s6: fragments are deprecated — running remaining fragments for backward compatibility"
+    fi
     for f in /etc/devcell/entrypoint.d/*.sh; do
         [ -x "$f" ] && { . "$f" || log "⚠ Fragment failed: $f (exit $?)"; }
     done
 fi
 
-# ── Fix ownership for files created by fragments ──────────────────────────────
-# Fragments run as root and may create files in $HOME without chown.
+# ── Fix ownership for files created by s6 services and fragments ─────────────
+# Both run as root and may create files in $HOME without chown.
 # Catch any missed files (max depth 2 to avoid expensive deep traversal).
 find "$HOME" -maxdepth 2 -user root -not -path "*/tmp/*" -exec chown "$HOST_USER" {} + 2>/dev/null || true
 

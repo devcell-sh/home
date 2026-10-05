@@ -4,6 +4,7 @@
     ./git.nix
     ./shell.nix
     ./llm
+    ./s6-linux-renderer.nix
   ];
 
   # Standalone activations (WSL cells) must leave the `home-manager` CLI on
