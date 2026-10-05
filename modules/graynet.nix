@@ -27,19 +27,5 @@ in {
       Log notice stderr
       DataDirectory /tmp/tor-data
     '';
-
-    home.file.".config/devcell/entrypoint.d/25-tor.sh" = {
-      executable = true;
-      text = ''
-        #!/usr/bin/env bash
-        notify graynet.starting
-        mkdir -p /tmp/tor-data
-        if ! tor -f "''${DEVCELL_HOME:-/opt/devcell}/.config/tor/torrc" --RunAsDaemon 1; then
-          echo "graynet: tor failed to start" >&2
-          exit 1
-        fi
-        notify graynet.ready
-      '';
-    };
   };
 }

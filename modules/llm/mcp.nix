@@ -52,11 +52,6 @@ in {
     };
   };
 
-  config.home.file.".config/devcell/entrypoint.d/29-mcp-toggle.sh" = {
-    executable = true;
-    source = ../fragments/mcp-toggle.sh;
-  };
-
   config.assertions = [
     {
       assertion = phantomNames == [];

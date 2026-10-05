@@ -1,0 +1,56 @@
+#!/bin/bash
+set -e
+
+# wireguard: bring up WireGuard tunnels from .wg/*.conf. Replaces 26-wireguard.sh fragment.
+
+[ "${DEVCELL_WG_ENABLED:-}" = "1" ] || exit 0
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+DEVCELL_CELL_NAME="${DEVCELL_CELL_NAME:-main}"
+WG_DIR="/home/$HOST_USER/.devcell/$DEVCELL_CELL_NAME/.wg"
+
+if [ ! -d "$WG_DIR" ] || [ -z "$(ls -A "$WG_DIR"/*.conf 2>/dev/null)" ]; then
+    echo "wireguard: no .conf files in $WG_DIR, skipping"
+    exit 0
+fi
+
+if [ -z "${WG_PRIVATE_KEY:-}" ]; then
+    echo "wireguard: WG_PRIVATE_KEY must be set when wireguard is enabled" >&2
+    exit 1
+fi
+
+mkdir -p /run/secrets
+echo "$WG_PRIVATE_KEY" > /run/secrets/wg-private-key
+chmod 600 /run/secrets/wg-private-key
+
+if [ -n "${WG_PRESHARED_KEY:-}" ]; then
+    echo "$WG_PRESHARED_KEY" > /run/secrets/wg-preshared-key
+    chmod 600 /run/secrets/wg-preshared-key
+fi
+
+# Patch wg-quick to skip redundant sysctl (read-only /proc/sys in Docker)
+WQ_WRAPPER=$(readlink -f "$(command -v wg-quick)")
+WQ_UNWRAPPED=$(grep "exec -a" "$WQ_WRAPPER" | grep -oP '/nix/store/[^"]+' | head -1)
+cp "$WQ_UNWRAPPED" /tmp/wg-quick-patched
+sed -i 's|cmd sysctl -q net.ipv4.conf.all.src_valid_mark=1|true|' /tmp/wg-quick-patched
+chmod +x /tmp/wg-quick-patched
+sed "s|$WQ_UNWRAPPED|/tmp/wg-quick-patched|" "$WQ_WRAPPER" > /tmp/wg-quick
+chmod +x /tmp/wg-quick
+
+for conf in "$WG_DIR"/*.conf; do
+    [ -f "$conf" ] || continue
+    name=$(basename "$conf" .conf)
+
+    dns=$(grep -oP '^\s*DNS\s*=\s*\K\S+' "$conf")
+    conf_nodns="/tmp/${name}.conf"
+    grep -v '^\s*DNS\s*=' "$conf" > "$conf_nodns"
+
+    /tmp/wg-quick up "$conf_nodns" 2>&1 || echo "wireguard[$name]: failed (non-fatal)"
+    rm -f "$conf_nodns"
+
+    if [ -n "$dns" ]; then
+        echo "nameserver $dns" > /etc/resolv.conf
+        echo "wireguard[$name]: DNS set to $dns"
+    fi
+    echo "wireguard: $name up"
+done

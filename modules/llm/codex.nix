@@ -205,12 +205,6 @@ in
       model = "Qwen/Qwen3.6-35B-A3B-FP8";
     };
 
-    # Always generate the Codex merge fragment (self-guards at runtime)
-    home.file.".config/devcell/entrypoint.d/30-codex.sh" = {
-      executable = true;
-      source = ../fragments/30-codex.sh;
-    };
-
     # Stage Codex MCP + provider + profile config when any is defined
     home.activation.setupManagedCodex = lib.mkIf (hasServers || hasProviders || hasProfiles) (
       lib.hm.dag.entryAfter [ "writeBoundary" ] ''

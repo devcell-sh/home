@@ -43,11 +43,6 @@ in {
   config = {
     home.packages = [pkgsEdge.antigravity-cli];
 
-    home.file.".config/devcell/entrypoint.d/31-antigravity.sh" = {
-      executable = true;
-      source = ../fragments/31-antigravity.sh;
-    };
-
     home.activation.setupManagedAntigravity =
       lib.hm.dag.entryAfter ["writeBoundary"] ''
         export PATH="/usr/bin:/bin:/run/wrappers/bin:$PATH"

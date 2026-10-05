@@ -64,17 +64,5 @@ in {
     home.file.".default-npm-packages" = lib.mkIf (cfg.defaultNpmPackages != []) {
       text = lib.concatStringsSep "\n" cfg.defaultNpmPackages + "\n";
     };
-
-    # ── Entrypoint fragment: mise setup ──────────────────────────────────────
-    home.file.".config/devcell/entrypoint.d/10-mise.sh" = {
-      executable = true;
-      source = ./fragments/10-mise.sh;
-    };
-
-    # ── Entrypoint fragment: [packages.python] / [packages.node] via mise ─────
-    home.file.".config/devcell/entrypoint.d/11-mise-packages.sh" = {
-      executable = true;
-      source = ./fragments/11-mise-packages.sh;
-    };
   };
 }

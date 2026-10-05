@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+# system-fixups (Linux): clean stale nix-store symlinks from persistent $HOME.
+# $HOME is a bind mount that survives image rebuilds. Home-manager symlinks
+# from previous builds dangle after nix GC removes old store paths.
+
+SESSION_HOME="${SESSION_HOME:-/home/${HOST_USER:-devcell}}"
+
+[ -d "$SESSION_HOME" ] || exit 0
+
+find "$SESSION_HOME" -maxdepth 4 -type l \
+    -not -path "*/tmp/*" \
+    -not -path "$SESSION_HOME/.config/devcell/*" \
+    2>/dev/null | while IFS= read -r _link; do
+    _target=$(readlink "$_link" 2>/dev/null)
+    case "$_target" in /nix/store/*)
+        if [ ! -e "$_link" ]; then
+            rm -f "$_link"
+        fi
+    ;; esac
+done

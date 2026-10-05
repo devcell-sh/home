@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+# tor: start Tor SOCKS proxy daemon. Replaces 25-tor.sh fragment.
+
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+
+mkdir -p /tmp/tor-data
+tor -f "$DEVCELL_HOME/.config/tor/torrc" --RunAsDaemon 1

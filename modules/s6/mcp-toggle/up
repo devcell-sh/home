@@ -1,0 +1,227 @@
+#!/bin/bash
+set -e
+
+# mcp-toggle: sync MCP disabled/enabled state across claude, codex, opencode.
+# Runs after the individual config services have merged MCP servers.
+# Replaces the _sync_*_mcp_state logic from 30-claude.sh, 30-codex.sh, 30-opencode.sh fragments.
+#
+# Uses DEVCELL_MCP_ENABLED (comma-separated list from .devcell.toml [mcp] enabled=[...])
+# to determine runtime overrides for which MCP servers are enabled/disabled.
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-/home/$HOST_USER}"
+
+_mcp_enabled_json() {
+    local raw="${DEVCELL_MCP_ENABLED:-}"
+    if [ -z "$raw" ]; then
+        echo '[]'
+    else
+        echo "$raw" | tr ',' '\n' | jq -R . | jq -s .
+    fi
+}
+
+# --- Claude MCP toggle (JSON, per-project disabledMcpServers) ---
+
+_claude_mcp_set() {
+    local config="$1" project_id="$2" name="$3" action="$4"
+    [ -f "$config" ] || return 1
+    local tmp
+    tmp=$(mktemp)
+    if [ "$action" = "disable" ]; then
+        jq --arg pid "$project_id" --arg name "$name" '
+            .projects[$pid].disabledMcpServers =
+                ((.projects[$pid].disabledMcpServers // []) + [$name] | unique)
+        ' "$config" > "$tmp"
+    else
+        jq --arg pid "$project_id" --arg name "$name" '
+            .projects[$pid].disabledMcpServers =
+                [(.projects[$pid].disabledMcpServers // [])[] | select(. != $name)]
+        ' "$config" > "$tmp"
+    fi
+    if [ -s "$tmp" ] && jq empty "$tmp" 2>/dev/null; then
+        mv "$tmp" "$config"
+    else
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+sync_claude_mcp() {
+    local claude_json="$1"
+    local project_id="/${HOSTNAME#cell-}"
+    local nix_file="/etc/claude-code/nix-mcp-servers.json"
+    [ -f "$claude_json" ] || return 0
+    [ -f "$nix_file" ] || return 0
+    jq empty "$claude_json" 2>/dev/null || return 0
+    jq empty "$nix_file" 2>/dev/null || return 0
+
+    if ! jq -e --arg pid "$project_id" '.projects[$pid]' "$claude_json" >/dev/null 2>&1; then
+        local _tmp
+        _tmp=$(mktemp)
+        jq --arg pid "$project_id" '.projects[$pid] = {}' "$claude_json" > "$_tmp"
+        if [ -s "$_tmp" ] && jq empty "$_tmp" 2>/dev/null; then
+            mv "$_tmp" "$claude_json"
+        else
+            rm -f "$_tmp"
+        fi
+    fi
+
+    local enabled_json
+    enabled_json=$(_mcp_enabled_json)
+    local name
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        _claude_mcp_set "$claude_json" "$project_id" "$name" disable
+    done < <(jq -r --argjson el "$enabled_json" '
+        [(.mcpServers // {}) | to_entries[] |
+         select(.value.enabled != true and ((.key as $k | $el | index($k)) == null)) |
+         .key][]
+    ' "$nix_file")
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        _claude_mcp_set "$claude_json" "$project_id" "$name" enable
+    done < <(jq -r --argjson el "$enabled_json" '
+        [(.mcpServers // {}) | to_entries[] |
+         select(.value.enabled == true or ((.key as $k | $el | index($k)) != null)) |
+         .key][]
+    ' "$nix_file")
+}
+
+# --- Codex MCP toggle (TOML, uses python3) ---
+
+_codex_mcp_set() {
+    local config="$1" name="$2" action="$3"
+    [ -f "$config" ] || return 1
+    python3 - "$config" "$name" "$action" <<'PYEOF'
+import sys, re
+
+config_path, server_name, action = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(config_path) as f:
+    content = f.read()
+
+header = f"[mcp_servers.{server_name}]"
+if header not in content:
+    sys.exit(0)
+
+lines = content.split("\n")
+result = []
+in_target = False
+enabled_written = False
+
+for line in lines:
+    stripped = line.strip()
+    if stripped == header:
+        in_target = True
+        result.append(line)
+        continue
+    if in_target and stripped.startswith("[") and stripped != header:
+        if action == "disable" and not enabled_written:
+            result.append("enabled = false")
+        in_target = False
+    if in_target and stripped.startswith("enabled"):
+        if action == "disable":
+            result.append("enabled = false")
+            enabled_written = True
+        continue
+    result.append(line)
+
+if in_target and action == "disable" and not enabled_written:
+    result.append("enabled = false")
+
+with open(config_path, "w") as f:
+    f.write("\n".join(result))
+PYEOF
+}
+
+sync_codex_mcp() {
+    local codex_toml="$HOME/.codex/config.toml"
+    local nix_file="/etc/codex/nix-mcp-servers.toml"
+    [ -f "$codex_toml" ] || return 0
+    [ -f "$nix_file" ] || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+
+    local enabled_json
+    enabled_json=$(_mcp_enabled_json)
+    local name
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        _codex_mcp_set "$codex_toml" "$name" disable
+    done < <(python3 -c "
+import tomllib, json, sys
+with open('$nix_file', 'rb') as f:
+    nix = tomllib.load(f)
+el = json.loads(sys.argv[1])
+for name, srv in nix.get('mcp_servers', {}).items():
+    if not isinstance(srv, dict): continue
+    if not srv.get('enabled', False) and name not in el:
+        print(name)
+" "$enabled_json")
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        _codex_mcp_set "$codex_toml" "$name" enable
+    done < <(python3 -c "
+import tomllib, json, sys
+with open('$nix_file', 'rb') as f:
+    nix = tomllib.load(f)
+el = json.loads(sys.argv[1])
+for name, srv in nix.get('mcp_servers', {}).items():
+    if not isinstance(srv, dict): continue
+    if srv.get('enabled', False) or name in el:
+        print(name)
+" "$enabled_json")
+}
+
+# --- OpenCode MCP toggle (JSON, .mcp field) ---
+
+_opencode_mcp_set() {
+    local config="$1" name="$2" action="$3"
+    [ -f "$config" ] || return 1
+    local tmp
+    tmp=$(mktemp)
+    if [ "$action" = "disable" ]; then
+        jq --arg name "$name" '.mcp[$name].enabled = false' "$config" > "$tmp"
+    else
+        jq --arg name "$name" '.mcp[$name].enabled = true' "$config" > "$tmp"
+    fi
+    if [ -s "$tmp" ] && jq empty "$tmp" 2>/dev/null; then
+        mv "$tmp" "$config"
+    else
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+sync_opencode_mcp() {
+    local oc_global="$HOME/.config/opencode/opencode.json"
+    [ -f "$HOME/.config/opencode/opencode.jsonc" ] && oc_global="$HOME/.config/opencode/opencode.jsonc"
+    local nix_file="/etc/opencode/nix-mcp-servers.json"
+    [ -f "$oc_global" ] || return 0
+    [ -f "$nix_file" ] || return 0
+
+    local enabled_json
+    enabled_json=$(_mcp_enabled_json)
+    local name
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        _opencode_mcp_set "$oc_global" "$name" disable
+    done < <(jq -r --argjson el "$enabled_json" '
+        [(.mcp // {}) | to_entries[] |
+         select(.value.enabled != true and ((.key as $k | $el | index($k)) == null)) |
+         .key][]
+    ' "$nix_file")
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        _opencode_mcp_set "$oc_global" "$name" enable
+    done < <(jq -r --argjson el "$enabled_json" '
+        [(.mcp // {}) | to_entries[] |
+         select(.value.enabled == true or ((.key as $k | $el | index($k)) != null)) |
+         .key][]
+    ' "$nix_file")
+}
+
+# --- Run all three ---
+
+sync_claude_mcp "$HOME/.claude.json"
+sync_codex_mcp
+sync_opencode_mcp

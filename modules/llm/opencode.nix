@@ -145,12 +145,6 @@ in {
     # opencode-throughput installs cleanly instead (same live test, no errors).
     devcell.managedOpencode.plugins = [ "opencode-throughput" ];
 
-    # Always generate the fragment (self-guards at runtime)
-    home.file.".config/devcell/entrypoint.d/30-opencode.sh" = {
-      executable = true;
-      source = ../fragments/30-opencode.sh;
-    };
-
     # Stage providers + MCP servers when configured
     home.activation.setupManagedOpencode = lib.mkIf (hasProviders || hasServers) (
       lib.hm.dag.entryAfter ["writeBoundary"] ''

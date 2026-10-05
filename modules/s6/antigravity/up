@@ -1,0 +1,116 @@
+#!/bin/sh
+set -e
+
+# antigravity: merge Antigravity CLI MCP servers into mcp_config.json.
+# Replaces 31-antigravity.sh fragment.
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-/home/$HOST_USER}"
+
+_mcp_enabled_json() {
+    local raw="${DEVCELL_MCP_ENABLED:-}"
+    if [ -z "$raw" ]; then
+        echo '[]'
+    else
+        echo "$raw" | tr ',' '\n' | jq -R . | jq -s .
+    fi
+}
+
+merge_antigravity_mcp() {
+    local target_file="$1"
+    local nix_file="/etc/antigravity/nix-mcp-servers.json"
+
+    [ -f "$nix_file" ] || return 0
+
+    if ! jq empty "$nix_file" 2>/dev/null; then
+        echo "antigravity: nix-mcp-servers.json is invalid JSON, skipping" >&2
+        return 1
+    fi
+
+    local backup_before_merge
+    backup_before_merge=$(jq -r '.backupBeforeMerge // true' "$nix_file")
+    local enabled_json
+    enabled_json=$(_mcp_enabled_json)
+
+    local filtered_file
+    filtered_file=$(mktemp)
+    jq --argjson enabled_list "$enabled_json" '
+      .mcpServers = (
+        (.mcpServers // {}) | to_entries |
+        map(select(.value.disabled == false or (.key as $k | $enabled_list | index($k)) != null)) |
+        map({key: .key, value: (.value | del(.disabled))}) |
+        from_entries
+      )
+    ' "$nix_file" > "$filtered_file" 2>/dev/null
+    if ! [ -s "$filtered_file" ] || ! jq empty "$filtered_file" 2>/dev/null; then
+        rm -f "$filtered_file"
+        echo "antigravity: failed to filter nix MCP servers, skipping" >&2
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$target_file")"
+
+    if [ ! -f "$target_file" ]; then
+        local temp_file
+        temp_file=$(mktemp)
+        jq '{mcpServers: (.mcpServers // {})}' "$filtered_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"
+            rm -f "$filtered_file"
+            return 1
+        fi
+        rm -f "$filtered_file"
+        return 0
+    fi
+
+    if ! jq empty "$target_file" 2>/dev/null; then
+        local corrupt_bak="${target_file}.corrupt-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$corrupt_bak"
+        local temp_file
+        temp_file=$(mktemp)
+        jq '{mcpServers: (.mcpServers // {})}' "$filtered_file" > "$temp_file"
+        if [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$target_file"
+        else
+            rm -f "$temp_file"
+            rm -f "$filtered_file"
+            return 1
+        fi
+        rm -f "$filtered_file"
+        return 0
+    fi
+
+    local backup_file=""
+    if [ "$backup_before_merge" = "true" ]; then
+        backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$target_file" "$backup_file"
+        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+    fi
+
+    local temp_file
+    temp_file=$(mktemp)
+    jq -s '
+      .[0] as $existing |
+      .[1].mcpServers as $nix |
+      (($existing.mcpServers // {}) | to_entries |
+        map(select(.value.command == null or (.value.command | (startswith("/opt/devcell/") or startswith("/nix/store/")) | not))) |
+        from_entries) as $cleaned |
+      $existing | .mcpServers = ($cleaned + ($nix // {}))
+    ' "$target_file" "$filtered_file" > "$temp_file" 2>/dev/null
+    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+        mv "$temp_file" "$target_file"
+    else
+        rm -f "$temp_file"
+        if [ -n "$backup_file" ] && [ -f "$backup_file" ]; then
+            cp "$backup_file" "$target_file"
+        fi
+        rm -f "$filtered_file"
+        return 1
+    fi
+    rm -f "$filtered_file"
+}
+
+merge_antigravity_mcp "$HOME/.gemini/config/mcp_config.json"
+[ -d "$HOME/.gemini/config" ] && chown -R "$HOST_USER" "$HOME/.gemini/config"

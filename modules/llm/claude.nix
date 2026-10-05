@@ -111,12 +111,6 @@ in {
       };
     };
 
-    # Always generate the entrypoint fragment (self-guards at runtime)
-    home.file.".config/devcell/entrypoint.d/30-claude.sh" = {
-      executable = true;
-      source = ../fragments/30-claude.sh;
-    };
-
     # Stage hooks + settings + MCP servers when configured
     home.activation.setupManagedClaude = lib.mkIf (hasHooks || hasSettings || hasServers) (
       lib.hm.dag.entryAfter ["writeBoundary"] ''
@@ -184,54 +178,11 @@ in {
           fi
           rm -f "$_stripped"
         }
-        _sync_claude_mcp_state() {
-          local _claude_json="$1"
-          local _project_id="/''${HOSTNAME#cell-}"
-          [ -f "$_claude_json" ] || return 0
-          jq empty "$_claude_json" 2>/dev/null || return 0
-          local _toggle="/etc/devcell/entrypoint.d/29-mcp-toggle.sh"
-          if [ -f "$_toggle" ]; then
-            . "$_toggle"
-          elif [ -f "$HOME/.config/devcell/entrypoint.d/29-mcp-toggle.sh" ]; then
-            . "$HOME/.config/devcell/entrypoint.d/29-mcp-toggle.sh"
-          else
-            return 0
-          fi
-          if ! jq -e --arg pid "$_project_id" '.projects[$pid]' "$_claude_json" >/dev/null 2>&1; then
-            local _tmp; _tmp=$(mktemp)
-            jq --arg pid "$_project_id" '.projects[$pid] = {}' "$_claude_json" > "$_tmp"
-            if [ -s "$_tmp" ] && jq empty "$_tmp" 2>/dev/null; then
-              mv "$_tmp" "$_claude_json"
-            else
-              rm -f "$_tmp"
-            fi
-          fi
-          local _enabled_json; _enabled_json=$(_mcp_enabled_json)
-          local _name
-          while IFS= read -r _name; do
-            [ -n "$_name" ] || continue
-            disableMcp claude "$_name" "$_claude_json" "$_project_id"
-          done < <(jq -r --argjson el "$_enabled_json" '
-            [(.mcpServers // {}) | to_entries[] |
-             select(.value.enabled != true and ((.key as $k | $el | index($k)) == null)) |
-             .key][]
-          ' "$_nix_file")
-          while IFS= read -r _name; do
-            [ -n "$_name" ] || continue
-            enableMcp claude "$_name" "$_claude_json" "$_project_id"
-          done < <(jq -r --argjson el "$_enabled_json" '
-            [(.mcpServers // {}) | to_entries[] |
-             select(.value.enabled == true or ((.key as $k | $el | index($k)) != null)) |
-             .key][]
-          ' "$_nix_file")
-        }
         if [ -f "$_nix_file" ] && command -v jq &>/dev/null; then
           _merge_claude_mcp "$HOME/.claude.json"
-          _sync_claude_mcp_state "$HOME/.claude.json"
           for _user_home in /home/*; do
             [ -d "$_user_home/.claude" ] && [ "$_user_home" != "$HOME" ] && \
-              _merge_claude_mcp "$_user_home/.claude.json" && \
-              _sync_claude_mcp_state "$_user_home/.claude.json"
+              _merge_claude_mcp "$_user_home/.claude.json"
           done
         fi
       ''

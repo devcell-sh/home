@@ -1,0 +1,416 @@
+#!/bin/bash
+set -e
+
+# gui-config: start GUI services (Xvfb, D-Bus, PulseAudio, WM, x11vnc, xrdp).
+# Replaces 50-gui.sh fragment. Only runs when DEVCELL_GUI_ENABLED=true.
+
+[ "$DEVCELL_GUI_ENABLED" = "true" ] || exit 0
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-/home/$HOST_USER}"
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+
+[ -f /etc/machine-id ] || dbus-uuidgen > /etc/machine-id 2>/dev/null || true
+
+DISPLAY_NUM=99
+RESOLUTION="${DEVCELL_RESOLUTION:-1920x1080x24}"
+DPI="${DEVCELL_DPI:-96}"
+SCALE="${DEVCELL_SCALE:-1}"
+_PROFILE="/opt/devcell/.local/state/nix/profiles/profile"
+
+mkdir -p /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
+
+_UID=$(id -u "$HOST_USER")
+XDG_RUNTIME_DIR="/run/user/$_UID"
+mkdir -p "$XDG_RUNTIME_DIR"
+chown "$HOST_USER:$(id -gn "$HOST_USER")" "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+export XDG_RUNTIME_DIR
+
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+export LIBGL_DRIVERS_PATH="$_PROFILE/lib/dri"
+export __EGL_VENDOR_LIBRARY_DIRS="${__EGL_VENDOR_LIBRARY_DIRS:-$_PROFILE/share/glvnd/egl_vendor.d}"
+
+_NIX_ENV="env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET"
+
+# ── Xvfb ─────────────────────────────────────────────────────────────────────
+echo "gui-config: starting Xvfb on display :${DISPLAY_NUM}"
+pkill -u "$HOST_USER" -x Xvfb 2>/dev/null || true
+sleep 0.2
+rm -f /tmp/.X${DISPLAY_NUM}-lock /tmp/.X11-unix/X${DISPLAY_NUM}
+setsid gosu "$HOST_USER" $_NIX_ENV Xvfb :${DISPLAY_NUM} -screen 0 ${RESOLUTION} -dpi ${DPI} +extension GLX +render +iglx \
+    < /dev/null > /tmp/Xvfb.log 2>&1 &
+export DISPLAY=:${DISPLAY_NUM}
+export GDK_SCALE=${SCALE}
+export GDK_DPI_SCALE=1
+export QT_SCALE_FACTOR=${SCALE}
+for i in $(seq 1 40); do
+    xset -display :${DISPLAY_NUM} q >/dev/null 2>&1 && break
+    sleep 0.05
+done
+
+# ── D-Bus session bus ─────────────────────────────────────────────────────────
+_DBUS_SOCKET="$XDG_RUNTIME_DIR/bus"
+pkill -u "$HOST_USER" -x dbus-daemon 2>/dev/null || true
+sleep 0.1
+rm -f "$_DBUS_SOCKET"
+setsid gosu "$HOST_USER" $_NIX_ENV dbus-daemon \
+    --config-file="$_PROFILE/share/dbus-1/session.conf" \
+    --nofork --address="unix:path=$_DBUS_SOCKET" \
+    < /dev/null > /tmp/dbus-session.log 2>&1 &
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$_DBUS_SOCKET"
+for i in $(seq 1 20); do
+    [ -S "$_DBUS_SOCKET" ] && break
+    sleep 0.05
+done
+if [ -S "$_DBUS_SOCKET" ]; then
+    echo "gui-config: D-Bus session bus ready"
+else
+    echo "gui-config: WARNING: D-Bus socket not found, SNI tray icons may not work"
+fi
+
+_GUI_RC_BLOCK="
+# -- XDG runtime & D-Bus session bus (appended by gui-config) --
+export XDG_RUNTIME_DIR=\"$XDG_RUNTIME_DIR\"
+export DBUS_SESSION_BUS_ADDRESS=\"unix:path=$_DBUS_SOCKET\""
+for _rcfile in .zshrc .zshenv .profile .bashrc; do
+    [ -f "$HOME/$_rcfile" ] && echo "$_GUI_RC_BLOCK" >> "$HOME/$_rcfile"
+done
+
+# SNI to XEmbed proxy
+if command -v snixembed >/dev/null 2>&1; then
+    pkill -u "$HOST_USER" -x snixembed 2>/dev/null || true
+    sleep 0.1
+    setsid gosu "$HOST_USER" $_NIX_ENV snixembed \
+        < /dev/null > /tmp/snixembed.log 2>&1 &
+fi
+
+# ── PulseAudio (null sink) ───────────────────────────────────────────────────
+PULSE_DIR="$XDG_RUNTIME_DIR"
+echo "gui-config: starting PulseAudio"
+XRDP_PULSE_MOD=$(find "$(dirname "$(command -v pulseaudio)")/../lib" -name 'module-xrdp-sink.so' 2>/dev/null | head -1)
+_PA_DL_SEARCH=()
+if [ -n "$XRDP_PULSE_MOD" ]; then
+    XRDP_PULSE_DIR=$(dirname "$XRDP_PULSE_MOD")
+    _PA_DL_SEARCH=(--dl-search-path="$XRDP_PULSE_DIR")
+fi
+PULSE_LOG="/var/log/pulseaudio.log"
+touch "$PULSE_LOG" && chown "$HOST_USER" "$PULSE_LOG"
+gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    pulseaudio --daemonize=yes --exit-idle-time=-1 --disable-shm=true -n \
+    --log-target=file:"$PULSE_LOG" --log-level=info \
+    "${_PA_DL_SEARCH[@]}" \
+    --load="module-null-sink sink_name=NullSink" \
+    --load="module-native-protocol-unix" 2>/dev/null
+PA_RC=$?
+export PULSE_SERVER="unix:$PULSE_DIR/pulse/native"
+if [ $PA_RC -eq 0 ]; then
+    echo "gui-config: PulseAudio started"
+else
+    echo "gui-config: ERROR: PulseAudio failed (exit $PA_RC)"
+fi
+
+if [ $PA_RC -eq 0 ]; then
+    _PA_RC_BLOCK="
+# -- PulseAudio (appended by gui-config) --
+export PULSE_SERVER=\"unix:$PULSE_DIR/pulse/native\""
+    for _rcfile in .zshrc .zshenv .profile .bashrc; do
+        [ -f "$HOME/$_rcfile" ] && echo "$_PA_RC_BLOCK" >> "$HOME/$_rcfile"
+    done
+fi
+
+_SCALE_RC_BLOCK="
+# -- HiDPI scaling (appended by gui-config) --
+export GDK_SCALE=${SCALE}
+export GDK_DPI_SCALE=1
+export QT_SCALE_FACTOR=${SCALE}"
+for _rcfile in .zshrc .zshenv .profile .bashrc; do
+    [ -f "$HOME/$_rcfile" ] && echo "$_SCALE_RC_BLOCK" >> "$HOME/$_rcfile"
+done
+
+# ── X resources ───────────────────────────────────────────────────────────────
+if [ -f "$DEVCELL_HOME/.Xresources" ]; then
+    _XRDB_OVERRIDE="Xft.dpi: ${DPI}"
+    if [ "$SCALE" -gt 1 ] 2>/dev/null; then
+        _XRDB_OVERRIDE="${_XRDB_OVERRIDE}
+XTerm*faceSize: $((11 * SCALE))
+XTerm*internalBorder: $((8 * SCALE))"
+    fi
+    (sleep 1; xrdb -display :${DISPLAY_NUM} -merge "$DEVCELL_HOME/.Xresources" 2>/dev/null; \
+     echo "$_XRDB_OVERRIDE" | xrdb -display :${DISPLAY_NUM} -merge 2>/dev/null) &
+    disown
+fi
+
+# ── Window manager ────────────────────────────────────────────────────────────
+if [ -z "$DEVCELL_WM" ]; then
+    if [ -f "$DEVCELL_HOME/.config/devcell/window-manager" ]; then
+        DEVCELL_WM=$(cat "$DEVCELL_HOME/.config/devcell/window-manager")
+    else
+        DEVCELL_WM="icewm"
+    fi
+fi
+
+WORKSPACE_NAME=" ${APP_NAME:-cell} "
+
+case "$DEVCELL_WM" in
+  fluxbox)
+    if [ -f "$DEVCELL_HOME/.fluxbox/wallpaper.png" ]; then
+        gosu "$HOST_USER" $_NIX_ENV feh --bg-fill "$DEVCELL_HOME/.fluxbox/wallpaper.png" 2>/dev/null || true
+    else
+        gosu "$HOST_USER" $_NIX_ENV xsetroot -solid '#1e1e2e' 2>/dev/null || true
+    fi
+
+    FLUXBOX_RC=/tmp/fluxbox-init
+    cp "$DEVCELL_HOME/.fluxbox/init" "$FLUXBOX_RC"
+    chmod u+w "$FLUXBOX_RC"
+    if grep -q "session.screen0.workspaceNames" "$FLUXBOX_RC"; then
+        sed -i "s/^session.screen0.workspaceNames:.*/session.screen0.workspaceNames: ${WORKSPACE_NAME}/" "$FLUXBOX_RC"
+    else
+        echo "session.screen0.workspaceNames: ${WORKSPACE_NAME}" >> "$FLUXBOX_RC"
+    fi
+
+    if [ "$SCALE" -gt 1 ] 2>/dev/null; then
+        FLUXBOX_OVERLAY=/tmp/fluxbox-overlay
+        cp "$DEVCELL_HOME/.fluxbox/overlay" "$FLUXBOX_OVERLAY" 2>/dev/null || touch "$FLUXBOX_OVERLAY"
+        chmod u+w "$FLUXBOX_OVERLAY"
+        cat >> "$FLUXBOX_OVERLAY" <<HIDPI
+! -- HiDPI overrides (scale=${SCALE}, injected by gui-config) --
+toolbar.height:  $((35 * SCALE))
+window.title.height:  $((30 * SCALE))
+window.borderWidth:  $((3 * SCALE))
+menu.borderWidth:  $((3 * SCALE))
+menu.itemHeight:  $((28 * SCALE))
+menu.titleHeight:  $((32 * SCALE))
+toolbar.borderWidth:  0
+toolbar.clock.font:  Fira Sans-$((10 * SCALE)):semibold
+toolbar.iconbar.focused.font:  Fira Sans-$((10 * SCALE)):semibold
+toolbar.iconbar.unfocused.font:  Fira Sans-$((10 * SCALE)):semibold
+toolbar.workspace.font:  Fira Sans-$((10 * SCALE)):semibold
+window.label.focus.font:  Fira Sans-$((11 * SCALE)):bold
+window.label.unfocus.font:  Fira Sans-$((11 * SCALE))
+menu.frame.font:  Fira Sans-$((12 * SCALE))
+menu.title.font:  Fira Sans-$((14 * SCALE)):bold
+HIDPI
+        sed -i "s|session.styleOverlay:.*|session.styleOverlay: $FLUXBOX_OVERLAY|" "$FLUXBOX_RC"
+        sed -i "s|session.screen0.tab.width:.*|session.screen0.tab.width: $((64 * SCALE))|" "$FLUXBOX_RC"
+        sed -i "s|session.screen0.iconbar.iconTextPadding:.*|session.screen0.iconbar.iconTextPadding: $((10 * SCALE))|" "$FLUXBOX_RC"
+    fi
+
+    echo "gui-config: starting fluxbox"
+    pkill -u "$HOST_USER" -x fluxbox 2>/dev/null || true
+    sleep 0.2
+    setsid gosu "$HOST_USER" $_NIX_ENV fluxbox -rc "$FLUXBOX_RC" \
+        < /dev/null > /tmp/fluxbox.log 2>&1 &
+    for i in $(seq 1 20); do
+        pgrep -u "$HOST_USER" fluxbox >/dev/null 2>&1 && break
+        sleep 0.05
+    done
+    if [ -f "$DEVCELL_HOME/.fluxbox/wallpaper.png" ]; then
+        gosu "$HOST_USER" $_NIX_ENV feh --bg-fill "$DEVCELL_HOME/.fluxbox/wallpaper.png" 2>/dev/null || true
+    fi
+    ;;
+
+  icewm)
+    ICEWM_WALLPAPER="$DEVCELL_HOME/.icewm/wallpaper.png"
+    CELL_ID="${APP_NAME:-${HOSTNAME:-}}"
+    RES_WH="${RESOLUTION%x*}"
+    if [ -f "$DEVCELL_HOME/.icewm/wallpaper-template.svg" ]; then
+        if sed "s|{{CELL_ID}}|${CELL_ID}|g" "$DEVCELL_HOME/.icewm/wallpaper-template.svg" \
+            | gosu "$HOST_USER" $_NIX_ENV rsvg-convert -w "${RES_WH%x*}" -h "${RES_WH#*x}" -o /tmp/wallpaper-live.png 2>/dev/null; then
+            ICEWM_WALLPAPER=/tmp/wallpaper-live.png
+        fi
+    fi
+    if [ -f "$ICEWM_WALLPAPER" ]; then
+        gosu "$HOST_USER" $_NIX_ENV feh --bg-fill "$ICEWM_WALLPAPER" 2>/dev/null || true
+    else
+        gosu "$HOST_USER" $_NIX_ENV xsetroot -solid '#1e1e2e' 2>/dev/null || true
+    fi
+
+    ICEWM_PREFS=/tmp/icewm-preferences
+    cp "$DEVCELL_HOME/.icewm/preferences" "$ICEWM_PREFS"
+    chmod u+w "$ICEWM_PREFS"
+    echo "WorkspaceNames=\"${WORKSPACE_NAME}\"" >> "$ICEWM_PREFS"
+
+    if [ "$SCALE" -gt 1 ] 2>/dev/null; then
+        cat >> "$ICEWM_PREFS" <<HIDPI
+# -- HiDPI overrides (scale=${SCALE}, injected by gui-config) --
+TitleBarHeight=$((26 * SCALE))
+MenuIconSize=$((24 * SCALE))
+SmallIconSize=$((24 * SCALE))
+LargeIconSize=$((32 * SCALE))
+HugeIconSize=$((48 * SCALE))
+BorderSizeX=$((1 * SCALE))
+BorderSizeY=$((1 * SCALE))
+DlgBorderSizeX=$((1 * SCALE))
+DlgBorderSizeY=$((1 * SCALE))
+ScrollBarX=$((16 * SCALE))
+ScrollBarY=$((16 * SCALE))
+TitleBarJustify=$((54 * SCALE))
+TitleFontNameXft="Fira Sans:size=$((11 * SCALE)):bold"
+MenuFontNameXft="Fira Sans:size=$((12 * SCALE))"
+StatusFontNameXft="Fira Sans:size=$((10 * SCALE)):bold"
+QuickSwitchFontNameXft="Fira Sans:size=$((10 * SCALE))"
+NormalButtonFontNameXft="Fira Sans:size=$((10 * SCALE))"
+ActiveButtonFontNameXft="Fira Sans:size=$((10 * SCALE))"
+NormalTaskBarFontNameXft="Fira Sans:size=$((10 * SCALE))"
+ActiveTaskBarFontNameXft="Fira Sans:size=$((10 * SCALE)):bold"
+ToolButtonFontNameXft="Fira Sans:size=$((10 * SCALE))"
+NormalWorkspaceFontNameXft="Fira Sans:size=$((10 * SCALE))"
+ActiveWorkspaceFontNameXft="Fira Sans:size=$((10 * SCALE)):bold"
+MinimizedWindowFontNameXft="Fira Sans:size=$((10 * SCALE))"
+ListBoxFontNameXft="Fira Sans:size=$((10 * SCALE))"
+ToolTipFontNameXft="Fira Sans:size=$((10 * SCALE))"
+ClockFontNameXft="Fira Sans:size=$((10 * SCALE)):bold"
+ApmFontNameXft="Fira Sans:size=$((10 * SCALE)):bold"
+InputFontNameXft="Fira Sans:size=$((10 * SCALE))"
+LabelFontNameXft="Fira Sans:size=$((10 * SCALE))"
+HIDPI
+    fi
+
+    echo "gui-config: starting icewm"
+    pkill -u "$HOST_USER" -x icewm 2>/dev/null || true
+    sleep 0.2
+    setsid gosu "$HOST_USER" $_NIX_ENV env \
+        ICEWM_PRIVCFG="$DEVCELL_HOME/.icewm" \
+        icewm --config="$ICEWM_PREFS" \
+        < /dev/null > /tmp/icewm.log 2>&1 &
+    for i in $(seq 1 20); do
+        pgrep -u "$HOST_USER" icewm >/dev/null 2>&1 && break
+        sleep 0.05
+    done
+    if [ -f "$ICEWM_WALLPAPER" ]; then
+        gosu "$HOST_USER" $_NIX_ENV feh --bg-fill "$ICEWM_WALLPAPER" 2>/dev/null || true
+    fi
+    ;;
+
+  *)
+    echo "gui-config: unknown WM '$DEVCELL_WM', falling back to icewm"
+    setsid gosu "$HOST_USER" $_NIX_ENV icewm \
+        < /dev/null > /tmp/icewm.log 2>&1 &
+    sleep 0.5
+    ;;
+esac
+
+# ── x11vnc ────────────────────────────────────────────────────────────────────
+echo "gui-config: starting x11vnc on port 5900"
+pkill -u "$HOST_USER" -x x11vnc 2>/dev/null || true
+sleep 0.2
+setsid gosu "$HOST_USER" $_NIX_ENV x11vnc -display :${DISPLAY_NUM} -forever -nevershared -passwd vnc -rfbport 5900 \
+    -desktop "${APP_NAME:-cell}" -pointer_mode 2 -repeat -xrandr \
+    < /dev/null > /tmp/x11vnc.log 2>&1 &
+
+echo "gui-config: VNC ready on :${EXT_VNC_PORT:-5900}"
+
+# ── xrdp ──────────────────────────────────────────────────────────────────────
+usermod -p "$(openssl passwd -6 rdp)" "$HOST_USER" 2>/dev/null || true
+
+XRDP_BIN=$(command -v xrdp 2>/dev/null)
+if [ -n "$XRDP_BIN" ]; then
+    XRDP_CFG="/tmp/xrdp"
+    mkdir -p "$XRDP_CFG"
+    XRDP_PREFIX=$(dirname "$(dirname "$(readlink -f "$XRDP_BIN")")")
+
+    cp -a "$XRDP_PREFIX/etc/xrdp/"* "$XRDP_CFG/" 2>/dev/null || true
+    chmod u+w "$XRDP_CFG/"* 2>/dev/null || true
+    ln -sfT "$XRDP_CFG" /etc/xrdp 2>/dev/null || true
+
+    if [ "$DEVCELL_DEBUG" = "true" ]; then
+        xrdp-keygen xrdp "$XRDP_CFG/rsakeys.ini" || true
+    else
+        xrdp-keygen xrdp "$XRDP_CFG/rsakeys.ini" >/dev/null 2>&1 || true
+    fi
+
+    XRDP_CERT_DIR="/etc/devcell/config/xrdp"
+    mkdir -p "$XRDP_CERT_DIR"
+    if [ ! -f "$XRDP_CERT_DIR/key.pem" ]; then
+        if [ "$DEVCELL_DEBUG" = "true" ]; then
+            openssl req -x509 -newkey rsa:2048 -nodes \
+                -keyout "$XRDP_CERT_DIR/key.pem" -out "$XRDP_CERT_DIR/cert.pem" \
+                -days 365 -subj "/CN=devcell"
+        else
+            openssl req -x509 -newkey rsa:2048 -nodes \
+                -keyout "$XRDP_CERT_DIR/key.pem" -out "$XRDP_CERT_DIR/cert.pem" \
+                -days 365 -subj "/CN=devcell" >/dev/null 2>&1
+        fi
+    fi
+
+    if [ "$DEVCELL_DEBUG" = "true" ]; then
+        XRDP_LOG_LEVEL="INFO"
+    else
+        XRDP_LOG_LEVEL="WARNING"
+    fi
+    sed -i \
+        -e "s|^port=.*|port=3389|" \
+        -e "s|^certificate=.*|certificate=$XRDP_CERT_DIR/cert.pem|" \
+        -e "s|^key_file=.*|key_file=$XRDP_CERT_DIR/key.pem|" \
+        -e "s|^security_layer=.*|security_layer=none|" \
+        -e "s|^autorun=.*|autorun=vnc-any|" \
+        -e "s|^max_bpp=.*|max_bpp=24|" \
+        -e "s|^allow_channels=.*|allow_channels=true|" \
+        -e "s|^LogFile=.*|LogFile=/var/log/xrdp.log|" \
+        -e "s|^LogLevel=.*|LogLevel=$XRDP_LOG_LEVEL|" \
+        -e "s|^#*EnableSyslog=.*|EnableSyslog=false|" \
+        -e "s|^#*default_dpi=.*|default_dpi=${DPI}|" \
+        -e "s|^cliprdr=.*|cliprdr=true|" \
+        "$XRDP_CFG/xrdp.ini"
+
+    sed -i '/^\[Xorg\]/,/^\[/{ /^\[vnc-any\]/!d; }' "$XRDP_CFG/xrdp.ini"
+
+    sed -i '/^\[vnc-any\]/,$d' "$XRDP_CFG/xrdp.ini"
+    {
+        echo '[vnc-any]'
+        echo 'name=VNC'
+        echo 'lib=libvnc.so'
+        echo 'ip=127.0.0.1'
+        echo 'port=5900'
+        echo "username=${HOST_USER}"
+        echo 'password=vnc'
+        echo 'xserverbpp=24'
+        _CHANSRV_UID=$(id -u "$HOST_USER")
+        echo "chansrvport=/var/run/xrdp/${_CHANSRV_UID}/xrdp_chansrv_socket_${DISPLAY_NUM}"
+    } >> "$XRDP_CFG/xrdp.ini"
+
+    XRDP_CHANSRV="$XRDP_PREFIX/sbin/xrdp-chansrv"
+    if [ -x "$XRDP_CHANSRV" ]; then
+        XRDP_RUN_DIR="/var/run/xrdp/${_CHANSRV_UID}"
+        mkdir -p "$XRDP_RUN_DIR"
+        chown "$HOST_USER:$(id -gn "$HOST_USER")" "$XRDP_RUN_DIR"
+        echo "gui-config: starting xrdp-chansrv"
+        setsid gosu "$HOST_USER" $_NIX_ENV env DISPLAY=:${DISPLAY_NUM} \
+            HOME="$HOME" \
+            CHANSRV_LOG_PATH="/tmp" \
+            PULSE_SERVER="unix:$PULSE_DIR/pulse/native" \
+            XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+            "$XRDP_CHANSRV" \
+            < /dev/null > /tmp/chansrv.log 2>&1 &
+        _CHANSRV_SOCK="$XRDP_RUN_DIR/xrdp_chansrv_socket_${DISPLAY_NUM}"
+        for i in $(seq 1 40); do
+            [ -S "$_CHANSRV_SOCK" ] && break
+            sleep 0.1
+        done
+        if [ -S "$_CHANSRV_SOCK" ]; then
+            echo "gui-config: chansrv socket ready"
+            if [ -n "$XRDP_PULSE_MOD" ]; then
+                _PA_RUN="gosu $HOST_USER $_NIX_ENV env PULSE_SERVER=unix:$PULSE_DIR/pulse/native XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+                $_PA_RUN pactl load-module module-xrdp-sink xrdp_socket_path=$XRDP_RUN_DIR >/dev/null 2>&1 && {
+                    $_PA_RUN pactl set-default-sink xrdp-sink 2>/dev/null || true
+                    echo "gui-config: xrdp-sink loaded"
+                } || echo "gui-config: WARNING: failed to load module-xrdp-sink"
+            fi
+        else
+            echo "gui-config: WARNING: chansrv socket not found after 4s"
+        fi
+    fi
+
+    echo "gui-config: starting xrdp on port 3389"
+    pkill -x xrdp 2>/dev/null || true
+    sleep 0.2
+    setsid $_NIX_ENV xrdp --nodaemon --config "$XRDP_CFG/xrdp.ini" \
+        < /dev/null >> /var/log/xrdp.log 2>&1 &
+
+    echo "gui-config: xrdp ready on :${EXT_RDP_PORT:-3389}"
+else
+    echo "gui-config: xrdp not found, skipping RDP server"
+fi

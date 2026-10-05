@@ -1,0 +1,54 @@
+#!/bin/sh
+set -e
+
+# base-init (Linux): container bootstrap — user creation, device permissions,
+# directories, GPG isolation. Runs as root before all other services.
+
+HOST_USER="${HOST_USER:-devcell}"
+SESSION_HOME="${SESSION_HOME:-/home/$HOST_USER}"
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+
+# Create session user if needed
+if ! id "$HOST_USER" >/dev/null 2>&1; then
+    useradd -m -s /bin/zsh "$HOST_USER" 2>/dev/null
+    echo "$HOST_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+fi
+
+# Grant docker socket access to session user
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+    DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
+    if [ -z "$DOCKER_GROUP" ]; then
+        groupadd -g "$DOCKER_GID" dockerhost
+        DOCKER_GROUP=dockerhost
+    fi
+    usermod -aG "$DOCKER_GROUP" "$HOST_USER"
+fi
+
+# Grant /dev/kvm access to session user (for QEMU guests)
+if [ -c /dev/kvm ]; then
+    KVM_GID=$(stat -c '%g' /dev/kvm)
+    KVM_GROUP=$(getent group "$KVM_GID" | cut -d: -f1)
+    if [ -z "$KVM_GROUP" ]; then
+        groupadd -g "$KVM_GID" kvm
+        KVM_GROUP=kvm
+    fi
+    usermod -aG "$KVM_GROUP" "$HOST_USER"
+fi
+
+# Create standard directories
+mkdir -p "$SESSION_HOME/.local/bin" "$SESSION_HOME/go/bin" "$SESSION_HOME/tmp"
+ln -sf "$DEVCELL_HOME/.local/bin/cell" "$SESSION_HOME/.local/bin/cell" 2>/dev/null || true
+chown -h "$HOST_USER" "$SESSION_HOME/.local" "$SESSION_HOME/.local/bin" \
+    "$SESSION_HOME/go" "$SESSION_HOME/go/bin" "$SESSION_HOME/tmp"
+
+# Isolate GPG per container (persistent $HOME shared across containers)
+GNUPGHOME="$SESSION_HOME/tmp/.gnupg"
+mkdir -p "$GNUPGHOME"
+chmod 700 "$GNUPGHOME"
+chown "$HOST_USER" "$GNUPGHOME"
+mkdir -p /etc/s6/env
+echo "$GNUPGHOME" > /etc/s6/env/GNUPGHOME
+
+# WebKit bwrap sandbox cannot run inside Docker (no CAP_SYS_ADMIN)
+echo "1" > /etc/s6/env/WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS

@@ -21,11 +21,5 @@ in {
     home.packages = [
       pkgs.postgresql  # PostgreSQL 17 (use: psql, pg_ctl, initdb)
     ];
-
-    # ── Entrypoint fragment: PostgreSQL ──────────────────────────
-    home.file.".config/devcell/entrypoint.d/40-postgres.sh" = {
-      executable = true;
-      source = ./fragments/40-postgres.sh;
-    };
   };
 }

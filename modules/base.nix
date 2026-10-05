@@ -33,30 +33,6 @@
     }";
   };
 
-  # ── Stage entrypoint fragments to /etc/devcell/entrypoint.d/ ───────────────
-  # Any module can drop a fragment into ~/.config/devcell/entrypoint.d/ via home.file.
-  # This activation script copies them to /etc/devcell/entrypoint.d/ where the base
-  # entrypoint sources them at container startup.
-  #
-  # Numbering convention:
-  #   10-* — early setup (future: mise extraction)
-  #   50-* — services (GUI, xrdp)
-  #   90-* — late setup (future: custom user hooks)
-  home.activation.stageEntrypoints = lib.hm.dag.entryAfter ["writeBoundary"] ''
-    export PATH="/usr/bin:/bin:$PATH"
-    # Skip when image was built by nix2container — fragments are already
-    # staged at /etc/devcell/entrypoint.d/ by the image-build derivation.
-    if [ -f /etc/devcell/.image-built-with-nix2container ]; then
-      $DRY_RUN_CMD echo "stageEntrypoints: skipped (nix2container-built image)"
-    else
-      $DRY_RUN_CMD sudo mkdir -p /etc/devcell/entrypoint.d
-      if [ -d "$HOME/.config/devcell/entrypoint.d" ]; then
-        $DRY_RUN_CMD sudo ${pkgs.rsync}/bin/rsync -a --chmod=+x --delete \
-          "$HOME/.config/devcell/entrypoint.d/" /etc/devcell/entrypoint.d/
-      fi
-    fi
-  '';
-
   # ── Write /etc/devcell/metadata.json from Docker ARGs ────────────────────────
   # Docker ARGs (DEVCELL_BASE_IMAGE, DEVCELL_STACK, DEVCELL_MODULES, GIT_COMMIT)
   # are inherited as env vars by `home-manager switch`. This activation script
@@ -98,58 +74,6 @@
       # stack diffs, and re-evaluation inside the container. Mirrors what
       # the impure (Dockerfile) variant already does at /opt/nixhome/.
       "nixhome".source = self;
-
-      # ── Entrypoint fragments ───────────────────────────────────────────────
-      # Standalone shell scripts sourced by entrypoint.sh at container start.
-      # See fragments/ directory for the actual shell code.
-      # 00 — sd_notify helper. Defines the `notify` shell function that all
-      # later fragments call to report boot progress to the host. MUST sort
-      # first (00 prefix) so it's sourced before any consumer. CELL-263.
-      ".config/devcell/entrypoint.d/00-notify.sh" = {
-        executable = true;
-        source = ./fragments/00-notify.sh;
-      };
-      # nix-daemon — runs as root, mediates /nix/store writes for the
-      # session user. Without it, `nix profile install` etc. fail because
-      # /nix/store is root-owned in the pure image.
-      ".config/devcell/entrypoint.d/04-nix-daemon.sh" = {
-        executable = true;
-        source = ./fragments/04-nix-daemon.sh;
-      };
-      ".config/devcell/entrypoint.d/05-shell-rc.sh" = {
-        executable = true;
-        source = ./fragments/05-shell-rc.sh;
-      };
-      # GC root stamp — ensures every running container has its nix
-      # profile pinned on the shared volume (CELL-332).
-      ".config/devcell/entrypoint.d/07-gcroot.sh" = {
-        executable = true;
-        source = ./fragments/07-gcroot.sh;
-      };
-      # Project flake — detects flake.nix in the project root and installs
-      # packages into a dedicated profile at start time (CELL-447).
-      ".config/devcell/entrypoint.d/08-project-flake.sh" = {
-        executable = true;
-        source = ./fragments/08-project-flake.sh;
-      };
-      # Per-project nix packages from .devcell.toml [packages.nix],
-      # passed via cell.json nix_packages array.
-      ".config/devcell/entrypoint.d/09-nix-packages.sh" = {
-        executable = true;
-        source = ./fragments/09-nix-packages.sh;
-      };
-      ".config/devcell/entrypoint.d/20-homedir.sh" = {
-        executable = true;
-        source = ./fragments/20-homedir.sh;
-      };
-      # 22 — sweep stale Chromium SingletonLock/Cookie/Socket files at boot
-      # (CELL-74). Required for the unified ~/.chrome/<app>/ profile layout:
-      # without cleanup, a SIGKILL'd chromium leaves locks pointing at a dead
-      # PID from a prior container generation, blocking future launches.
-      ".config/devcell/entrypoint.d/22-chromium-singleton.sh" = {
-        executable = true;
-        source = ./fragments/22-chromium-singleton.sh;
-      };
     }
     // lib.optionalAttrs pkgs.stdenv.isLinux {
       # nix-ld stable symlinks (Linux-only — glibc + nix-ld don't exist on darwin)
@@ -162,14 +86,6 @@
       };
       ".nix-ld-shim" = {
         source = "${pkgs.nix-ld}/libexec/nix-ld";
-      };
-      # Locale — must run before any other fragment so bash doesn't warn.
-      ".config/devcell/entrypoint.d/01-locale.sh" = {
-        executable = true;
-        text = ''
-          #!/bin/sh
-          export LOCALE_ARCHIVE="${pkgs.glibcLocales}/lib/locale/locale-archive"
-        '';
       };
     };
 

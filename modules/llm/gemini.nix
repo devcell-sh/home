@@ -51,12 +51,6 @@ in {
   config = {
     home.packages = [pkgsEdge.gemini-cli];
 
-    # Always generate the Gemini merge fragment (self-guards at runtime)
-    home.file.".config/devcell/entrypoint.d/30-gemini.sh" = {
-      executable = true;
-      source = ../fragments/30-gemini.sh;
-    };
-
     # Always stage the MCP servers file (even when empty) so the
     # entrypoint cleanup removes stale /opt/devcell/ servers on stack switch.
     home.activation.setupManagedGemini =

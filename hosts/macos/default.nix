@@ -79,6 +79,22 @@
       -activate -configure -access -on \
       -restart -agent -privs -all \
       -allowAccessFor -allUsers 2>/dev/null || true
+
+    # Grant tart-guest-agent screen capture and microphone TCC permissions so
+    # it can share the VM display without an interactive consent dialog.
+    AGENT=$(command -v tart-guest-agent 2>/dev/null \
+      || { [ -x /usr/local/bin/tart-guest-agent ] && echo /usr/local/bin/tart-guest-agent; } \
+      || { find /usr/local /opt/homebrew -name tart-guest-agent -type f 2>/dev/null | head -1; })
+    if [ -n "$AGENT" ]; then
+      TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+      for SVC in kTCCServiceScreenCapture kTCCServiceMicrophone kTCCServiceListenEvent; do
+        sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, policy_id, indirect_object_identifier_type, indirect_object_identifier, indirect_object_code_identity, flags, last_modified) VALUES ('$SVC', '$AGENT', 1, 2, 4, 1, NULL, NULL, 0, 'UNUSED', NULL, 0, CAST(strftime('%s','now') AS INTEGER));" 2>/dev/null \
+          && echo "TCC: granted $SVC to $AGENT" \
+          || echo "TCC: failed to grant $SVC to $AGENT (SIP may block writes)"
+      done
+    else
+      echo "TCC: tart-guest-agent not found, skipping permission grants"
+    fi
   '';
 
   # Required for nix-darwin

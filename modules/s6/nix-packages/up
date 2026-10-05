@@ -1,0 +1,76 @@
+#!/bin/bash
+set -e
+
+# nix-packages: install per-project nix packages from cell.json. Replaces 09-nix-packages.sh fragment.
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-/home/$HOST_USER}"
+PROJECT_DIR="${WORKSPACE:-}"
+
+[ -z "$PROJECT_DIR" ] && exit 0
+
+_CELL_JSON="$PROJECT_DIR/.devcell/cell.json"
+[ -f "$_CELL_JSON" ] || exit 0
+command -v jq &>/dev/null || { echo "nix-packages: jq not found, skipping"; exit 0; }
+
+_NIX_PKGS=$(jq -r '.nix_packages[]?' "$_CELL_JSON" 2>/dev/null)
+[ -z "$_NIX_PKGS" ] && exit 0
+
+_PKG_COUNT=$(echo "$_NIX_PKGS" | wc -l)
+echo "nix-packages: found $_PKG_COUNT package(s) in cell.json"
+
+NIX_PKG_CACHE="$HOME/.cache/devcell/nix-packages"
+NIX_PKG_PROFILE="$HOME/.local/state/nix/profiles/devcell-toml"
+
+mkdir -p "$NIX_PKG_CACHE"
+chown -R "$HOST_USER" "$HOME/.cache/devcell" 2>/dev/null || true
+
+_pkg_hash=$(echo "$_NIX_PKGS" | sha256sum | cut -d' ' -f1)
+_hash_file="$NIX_PKG_CACHE/packages.hash"
+
+if [ -f "$_hash_file" ] && [ "$(cat "$_hash_file" 2>/dev/null)" = "$_pkg_hash" ] && [ -e "$NIX_PKG_PROFILE" ]; then
+    echo "nix-packages: unchanged, skipping install"
+    exit 0
+fi
+
+export NIX_CONF_DIR="${NIX_CONF_DIR:-/opt/devcell/.config/nix}"
+
+if [ -e "$NIX_PKG_PROFILE" ]; then
+    rm -f "$NIX_PKG_PROFILE" "${NIX_PKG_PROFILE}"-*
+    echo "nix-packages: cleared previous profile"
+fi
+
+echo "nix-packages: installing..."
+_install_log=$(mktemp)
+_failed=0
+
+while IFS= read -r _pkg; do
+    [ -z "$_pkg" ] && continue
+    if gosu "$HOST_USER" nix profile install \
+        --profile "$NIX_PKG_PROFILE" \
+        "nixpkgs#$_pkg" >> "$_install_log" 2>&1; then
+        echo "nix-packages: installed $_pkg"
+    else
+        echo "nix-packages: FAILED to install $_pkg"
+        _failed=1
+    fi
+done <<< "$_NIX_PKGS"
+
+cat "$_install_log"
+rm -f "$_install_log"
+
+if [ "$_failed" -eq 0 ]; then
+    echo "$_pkg_hash" > "$_hash_file"
+    chown -R "$HOST_USER" "$NIX_PKG_CACHE" 2>/dev/null || true
+    chown -R "$HOST_USER" "$HOME/.local/state/nix/profiles" 2>/dev/null || true
+
+    _profile_store=$(readlink -f "$NIX_PKG_PROFILE" 2>/dev/null)
+    if [ -n "$_profile_store" ] && [ -d /nix/var/nix/gcroots/devcell ]; then
+        _profile_hash=$(basename "$_profile_store" | cut -d- -f1)
+        ln -sfT "$_profile_store" "/nix/var/nix/gcroots/devcell/${_profile_hash}-nix-packages"
+        echo "nix-packages: GC root stamped"
+    fi
+    echo "nix-packages: installed $_PKG_COUNT package(s) successfully"
+else
+    echo "nix-packages: some packages failed to install (continuing)"
+fi

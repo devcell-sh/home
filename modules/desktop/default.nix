@@ -468,24 +468,7 @@ in
   home.file = {
     ".Xresources".text = xresources;
 
-    # ── Entrypoint fragment: LD_LIBRARY_PATH from full nix closure ──────────
-    ".config/devcell/entrypoint.d/06-nix-ldpath.sh" = {
-      executable = true;
-      source = ../fragments/06-nix-ldpath.sh;
-    };
-
-    # ── Entrypoint fragment: op-resolved secrets to tmpfs for MCP tools ────────
-    ".config/devcell/entrypoint.d/21-secrets.sh" = {
-      executable = true;
-      source = ../fragments/21-secrets.sh;
-    };
-
-    # ── Entrypoint fragment: GUI service startup ────────────────────────────
-    ".config/devcell/entrypoint.d/50-gui.sh" = {
-      executable = true;
-      source = ../fragments/50-gui.sh;
-    };
-    # WM selector — read by 50-gui.sh to decide which WM to launch
+    # WM selector — read by s6 oneshot gui-config to decide which WM to launch
     ".config/devcell/window-manager".text = wm;
   }
   # ── Fluxbox theme files (when windowManager = "fluxbox") ──────────────────
