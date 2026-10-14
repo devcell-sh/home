@@ -1,5 +1,57 @@
 # base.nix — utilities present in every stack
-{pkgs, lib, pkgsUnstable, self, ...}: {
+{pkgs, lib, pkgsUnstable, self, ...}:
+
+let
+  devcell-event = pkgs.writeShellScriptBin "devcell-event" ''
+    if [ -n "''${RC_NAME:-}" ]; then
+      SERVICE="$RC_NAME"
+    else
+      SERVICE="$(basename "$(pwd)")"
+    fi
+    JQ="${pkgs.jq}/bin/jq"
+    FD="/proc/1/fd/1"
+    case "$(readlink /proc/1/fd/1 2>/dev/null)" in
+      /dev/pts/*) FD="/dev/null" ;;
+    esac
+
+    _emit() {
+      $JQ -nc \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg service "$SERVICE" \
+        --arg status "$1" \
+        --arg msg "''${2:-}" \
+        '{ts: $ts, scope: "service", service: $service, status: $status}
+         + if $msg != "" then {msg: $msg} else {} end' \
+        > "$FD" 2>/dev/null || true
+    }
+
+    case "''${1:-}" in
+      exec)
+        shift
+        _emit "activating"
+        if OUTPUT=$("$@" 2>&1); then
+          _emit "up" "$OUTPUT"
+        else
+          _emit "failed" "$OUTPUT"
+        fi
+        ;;
+      pipe)
+        while IFS= read -r line; do
+          $JQ -nc \
+            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg service "$SERVICE" \
+            --arg msg "$line" \
+            '{ts: $ts, scope: "log", service: $service, msg: $msg}' \
+            > "$FD" 2>/dev/null || true
+        done
+        ;;
+      *)
+        _emit "$1" "''${2:-}"
+        ;;
+    esac
+  '';
+
+in {
   imports = [
     ./git.nix
     ./shell.nix
@@ -89,7 +141,9 @@
       };
     };
 
-  home.packages = with pkgs; [
+  home.packages = [
+    devcell-event
+  ] ++ (with pkgs; [
     # fonts — monospace with good Unicode block element coverage
     fira-code      # popular terminal font; decent block elements
     noto-fonts     # comprehensive Unicode incl. Noto Sans Mono
@@ -121,12 +175,15 @@
     gnutar # GNU tar — POSIX archiver (use: tar). Was on Debian base, lost on slim.
     wget # HTTP downloader
     rsync # fast file sync (used by entrypoint fragment staging)
+    s6 # s6 process supervision (use: s6-svscan, s6-supervise, s6-notifyoncheck)
+    s6-rc # s6 service manager (use: s6-rc, s6-rc-init, s6-rc-compile)
+    execline # execline scripting language (s6-rc parses oneshot "up" files as execline)
     yq-go # TOML/YAML/JSON processor
-  ] ++ lib.optionals pkgs.stdenv.isLinux [
+  ]) ++ lib.optionals pkgs.stdenv.isLinux (with pkgs; [
     glibcLocales # en_US.UTF-8 locale for browser fingerprinting + text handling
     bubblewrap   # unprivileged sandboxing tool used by Linux-only tooling
     nix-ld       # dynamic linker shim for non-nix binaries (glibc-based, Linux-only)
     fuse3        # FUSE userspace filesystem support (provides fusermount3)
     tini         # minimal init for containers (Linux-only)
-  ];
+  ]);
 }

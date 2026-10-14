@@ -1,0 +1,11 @@
+#!/bin/sh
+# snixembed longrun: SNI→XEmbed proxy for IceWM tray.
+# Bridges modern tray icons (Wails, Electron, GTK3+/Qt) to XEmbed.
+# Depends on dbus-session and xvfb.
+
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+
+devcell-event fork s6-envdir /etc/s6/env \
+    gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    DISPLAY=:99 snixembed

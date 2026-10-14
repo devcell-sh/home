@@ -1,0 +1,43 @@
+#!/bin/bash
+set -e
+
+# wallpaper: apply desktop wallpaper after the window manager is ready.
+# Depends on window-manager (which signals readiness via EWMH check).
+
+
+devcell-event "activating"
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+export DISPLAY=:99
+
+# Prefer the runtime-rendered wallpaper (has cell-ID watermark),
+# fall back to the build-time default from the nix profile.
+WALLPAPER=/tmp/wallpaper-live.png
+
+if [ -z "$DEVCELL_WM" ]; then
+    if [ -f "$DEVCELL_HOME/.config/devcell/window-manager" ]; then
+        DEVCELL_WM=$(cat "$DEVCELL_HOME/.config/devcell/window-manager")
+    else
+        DEVCELL_WM="icewm"
+    fi
+fi
+
+case "$DEVCELL_WM" in
+  fluxbox)
+    [ -f "$WALLPAPER" ] || WALLPAPER="$DEVCELL_HOME/.fluxbox/wallpaper.png"
+    ;;
+  *)
+    [ -f "$WALLPAPER" ] || WALLPAPER="$DEVCELL_HOME/.icewm/wallpaper.png"
+    ;;
+esac
+
+if [ -f "$WALLPAPER" ]; then
+    gosu "$HOST_USER" env -u LD_LIBRARY_PATH DISPLAY=:99 \
+        feh --bg-fill "$WALLPAPER" 2>/dev/null || true
+else
+    gosu "$HOST_USER" env -u LD_LIBRARY_PATH DISPLAY=:99 \
+        xsetroot -solid '#1e1e2e' 2>/dev/null || true
+fi
+
+devcell-event "up"

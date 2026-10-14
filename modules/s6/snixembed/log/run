@@ -1,0 +1,3 @@
+#!/bin/sh
+mkdir -p /var/log/s6/snixembed
+exec s6-log -b -- t /var/log/s6/snixembed/
