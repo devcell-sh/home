@@ -11,13 +11,15 @@ PROJECT_DIR="${WORKSPACE:-}"
 
 _CELL_JSON="$PROJECT_DIR/.devcell/cell.json"
 [ -f "$_CELL_JSON" ] || exit 0
-command -v jq &>/dev/null || { echo "nix-packages: jq not found, skipping"; exit 0; }
+command -v jq &>/dev/null || { echo "jq not found, skipping" | devcell-event pipe; exit 0; }
 
 _NIX_PKGS=$(jq -r '.nix_packages[]?' "$_CELL_JSON" 2>/dev/null)
 [ -z "$_NIX_PKGS" ] && exit 0
 
+devcell-event "activating"
+
 _PKG_COUNT=$(echo "$_NIX_PKGS" | wc -l)
-echo "nix-packages: found $_PKG_COUNT package(s) in cell.json"
+echo "found $_PKG_COUNT package(s) in cell.json" | devcell-event pipe
 
 NIX_PKG_CACHE="$HOME/.cache/devcell/nix-packages"
 NIX_PKG_PROFILE="$HOME/.local/state/nix/profiles/devcell-toml"
@@ -29,7 +31,7 @@ _pkg_hash=$(echo "$_NIX_PKGS" | sha256sum | cut -d' ' -f1)
 _hash_file="$NIX_PKG_CACHE/packages.hash"
 
 if [ -f "$_hash_file" ] && [ "$(cat "$_hash_file" 2>/dev/null)" = "$_pkg_hash" ] && [ -e "$NIX_PKG_PROFILE" ]; then
-    echo "nix-packages: unchanged, skipping install"
+    echo "unchanged, skipping install" | devcell-event pipe
     exit 0
 fi
 
@@ -37,10 +39,10 @@ export NIX_CONF_DIR="${NIX_CONF_DIR:-/opt/devcell/.config/nix}"
 
 if [ -e "$NIX_PKG_PROFILE" ]; then
     rm -f "$NIX_PKG_PROFILE" "${NIX_PKG_PROFILE}"-*
-    echo "nix-packages: cleared previous profile"
+    echo "cleared previous profile" | devcell-event pipe
 fi
 
-echo "nix-packages: installing..."
+echo "installing..." | devcell-event pipe
 _install_log=$(mktemp)
 _failed=0
 
@@ -49,9 +51,9 @@ while IFS= read -r _pkg; do
     if gosu "$HOST_USER" nix profile install \
         --profile "$NIX_PKG_PROFILE" \
         "nixpkgs#$_pkg" >> "$_install_log" 2>&1; then
-        echo "nix-packages: installed $_pkg"
+        echo "installed $_pkg" | devcell-event pipe
     else
-        echo "nix-packages: FAILED to install $_pkg"
+        devcell-event "warn" "FAILED to install $_pkg"
         _failed=1
     fi
 done <<< "$_NIX_PKGS"
@@ -68,9 +70,11 @@ if [ "$_failed" -eq 0 ]; then
     if [ -n "$_profile_store" ] && [ -d /nix/var/nix/gcroots/devcell ]; then
         _profile_hash=$(basename "$_profile_store" | cut -d- -f1)
         ln -sfT "$_profile_store" "/nix/var/nix/gcroots/devcell/${_profile_hash}-nix-packages"
-        echo "nix-packages: GC root stamped"
+        echo "GC root stamped" | devcell-event pipe
     fi
-    echo "nix-packages: installed $_PKG_COUNT package(s) successfully"
+    echo "installed $_PKG_COUNT package(s) successfully" | devcell-event pipe
 else
-    echo "nix-packages: some packages failed to install (continuing)"
+    devcell-event "warn" "some packages failed to install (continuing)"
 fi
+
+devcell-event "up"

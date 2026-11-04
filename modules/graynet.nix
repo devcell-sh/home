@@ -16,6 +16,10 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    devcell.s6.services = {
+      tor = ./s6/tor;
+    };
+
     home.packages = with pkgs; [
       tor               # SOCKS5 proxy daemon on :9050 (use: tor)
       torsocks          # LD_PRELOAD TCP-through-Tor wrapper (use: torsocks curl ...)

@@ -1,9 +1,8 @@
 # hosts/macos/default.nix — nix-darwin system config for the devcell macOS VM
 # Applied via: nix run nix-darwin -- switch --flake /Volumes/nixhome#<stack>
 { pkgs, ... }: {
-  imports = [
-    ../../modules/s6-darwin-renderer.nix
-  ];
+  # s6-darwin-renderer is now a home-manager module imported by base.nix.
+
   # Nix daemon settings
   nix.settings = {
     experimental-features = "nix-command flakes";

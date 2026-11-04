@@ -1,13 +1,18 @@
 #!/bin/sh
 
-# postgres: supervised PostgreSQL longrun. Replaces 40-postgres.sh (daemon part).
-
 DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
 HOST_USER="${HOST_USER:-$(id -un)}"
 HOME="${SESSION_HOME:-$HOME}"
 
 NIX_BIN="$DEVCELL_HOME/.local/state/nix/profiles/profile/bin"
+
+if [ ! -x "$NIX_BIN/postgres" ]; then
+    echo >&3 2>/dev/null || true
+    exec sleep 86400
+fi
+
 PGDATA="$HOME/.local/share/postgresql"
 PGPORT=5432
 
-exec su - "$HOST_USER" -c "exec '$NIX_BIN/postgres' -D '$PGDATA' -p $PGPORT -k /tmp"
+devcell-event fork s6-notifyoncheck -d -s 500 -t 30000 \
+    gosu "$HOST_USER" "$NIX_BIN/postgres" -D "$PGDATA" -p $PGPORT -k /tmp

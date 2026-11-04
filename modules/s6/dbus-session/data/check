@@ -1,0 +1,4 @@
+#!/bin/sh
+HOST_USER="${HOST_USER:-$(id -un)}"
+_UID=$(id -u "$HOST_USER")
+test -S "/run/user/$_UID/bus"

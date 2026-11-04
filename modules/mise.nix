@@ -22,6 +22,10 @@ in {
   };
 
   config = {
+    devcell.s6.services = {
+      mise          = ./s6/mise;
+      mise-packages = ./s6/mise-packages;
+    };
     # pkgsEdge: shared install dirs (MISE_SHARED_INSTALL_DIRS) need mise
     # ≥2026.3.9 (jdx/mise#8581); nixpkgs stable/unstable lag behind.
     home.packages = [ pkgsEdge.mise ];

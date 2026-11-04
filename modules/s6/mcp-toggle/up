@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+devcell-event "activating"
+
 # mcp-toggle: sync MCP disabled/enabled state across claude, codex, opencode.
 # Runs after the individual config services have merged MCP servers.
 # Replaces the _sync_*_mcp_state logic from 30-claude.sh, 30-codex.sh, 30-opencode.sh fragments.
@@ -225,3 +227,5 @@ sync_opencode_mcp() {
 sync_claude_mcp "$HOME/.claude.json"
 sync_codex_mcp
 sync_opencode_mcp
+
+devcell-event "up"

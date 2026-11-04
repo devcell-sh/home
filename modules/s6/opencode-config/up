@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+devcell-event "activating"
+
 # opencode-config: merge OpenCode providers + MCP servers. Replaces 30-opencode.sh.
 
 DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
@@ -28,12 +30,12 @@ merge_opencode_providers() {
     jq empty "$target_file" 2>/dev/null || return 1
 
     temp_file=$(mktemp)
-    jq -s '
+    if jq -s '
       .[0] as $existing |
       .[1].provider as $nix |
       $existing | .provider = (($nix // {}) + ($existing.provider // {}))
-    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
-    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null \
+       && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
         mv "$temp_file" "$target_file"
     else
         rm -f "$temp_file"
@@ -77,19 +79,19 @@ merge_opencode_mcp() {
     if [ "$backup_before_merge" = "true" ]; then
         backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
         cp "$target_file" "$backup_file"
-        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+        find "$(dirname "${target_file}")" -maxdepth 1 -name "$(basename "${target_file}").backup-*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2- | xargs rm -f 2>/dev/null || true
     fi
 
     temp_file=$(mktemp)
-    jq -s '
+    if jq -s '
       .[0] as $existing |
       .[1].mcp as $nix |
       (($existing.mcp // {}) | to_entries |
         map(select(.value.command == null or (.value.command[0] == null) or (.value.command[0] | startswith("/opt/devcell/") | not))) |
         from_entries) as $cleaned |
       $existing | .mcp = ($cleaned + ($nix // {}))
-    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null
-    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+    ' "$target_file" "$nix_file" > "$temp_file" 2>/dev/null \
+       && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
         mv "$temp_file" "$target_file"
     else
         rm -f "$temp_file"
@@ -110,3 +112,5 @@ merge_opencode_providers "$HOME/opencode.json"
 
 merge_opencode_mcp "$HOME/.opencode.json"
 [ -f "$HOME/.opencode.json" ] && chown "$HOST_USER" "$HOME/.opencode.json"
+
+devcell-event "up"

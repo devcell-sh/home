@@ -1,0 +1,22 @@
+#!/bin/sh
+# pulseaudio longrun: null sink for Chromium AudioContext anti-fingerprinting.
+# Depends on base-init.
+
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+_UID=$(id -u "$HOST_USER")
+XDG_RUNTIME_DIR="/run/user/$_UID"
+
+XRDP_PULSE_MOD=$(find "$(dirname "$(command -v pulseaudio)")/../lib" -name 'module-xrdp-sink.so' 2>/dev/null | head -1)
+_PA_DL_SEARCH=""
+if [ -n "$XRDP_PULSE_MOD" ]; then
+    _PA_DL_SEARCH="--dl-search-path=$(dirname "$XRDP_PULSE_MOD")"
+fi
+
+devcell-event fork gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+    pulseaudio --exit-idle-time=-1 --disable-shm=true -n \
+    --log-level=info \
+    ${_PA_DL_SEARCH:+"$_PA_DL_SEARCH"} \
+    --load="module-null-sink sink_name=NullSink" \
+    --load="module-native-protocol-unix"

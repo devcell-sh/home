@@ -18,6 +18,11 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    devcell.s6.services = {
+      postgres      = ./s6/postgres;
+      postgres-init = ./s6/postgres-init;
+    };
+
     home.packages = [
       pkgs.postgresql  # PostgreSQL 17 (use: psql, pg_ctl, initdb)
     ];

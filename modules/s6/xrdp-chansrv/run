@@ -1,0 +1,28 @@
+#!/bin/sh
+# xrdp-chansrv longrun: channel handler for clipboard/audio over RDP.
+# Depends on xrdp.
+
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+SESSION_HOME="${SESSION_HOME:-/home/$HOST_USER}"
+DISPLAY_NUM=99
+_UID=$(id -u "$HOST_USER")
+XDG_RUNTIME_DIR="/run/user/$_UID"
+
+XRDP_BIN=$(command -v xrdp 2>/dev/null)
+[ -n "$XRDP_BIN" ] || exit 0
+XRDP_PREFIX=$(dirname "$(dirname "$(readlink -f "$XRDP_BIN")")")
+XRDP_CHANSRV="$XRDP_PREFIX/sbin/xrdp-chansrv"
+[ -x "$XRDP_CHANSRV" ] || exit 0
+
+XRDP_RUN_DIR="/var/run/xrdp/$_UID"
+mkdir -p "$XRDP_RUN_DIR"
+chown "$HOST_USER:$(id -gn "$HOST_USER")" "$XRDP_RUN_DIR"
+
+devcell-event fork gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    DISPLAY=:${DISPLAY_NUM} \
+    HOME="$SESSION_HOME" \
+    CHANSRV_LOG_PATH="/tmp" \
+    PULSE_SERVER="unix:$XDG_RUNTIME_DIR/pulse/native" \
+    XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+    "$XRDP_CHANSRV"

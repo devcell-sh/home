@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+devcell-event "activating"
+
 # codex-config: merge Codex CLI MCP servers. Replaces 30-codex.sh.
 
 DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
@@ -33,11 +35,12 @@ print('true' if d.get('backupBeforeMerge', True) else 'false')
     if [ -f "$target_file" ] && [ "$backup_before_merge" = "true" ]; then
         backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
         cp "$target_file" "$backup_file"
-        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+        find "$(dirname "${target_file}")" -maxdepth 1 -name "$(basename "${target_file}").backup-*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2- | xargs rm -f 2>/dev/null || true
     fi
 
     temp_file=$(mktemp)
-    python3 - "$nix_file" "$target_file" "$temp_file" 2>/dev/null << 'PYEOF'
+    py_ok=true
+    python3 - "$nix_file" "$target_file" "$temp_file" 2>/dev/null << 'PYEOF' || py_ok=false
 import sys, tomllib, os
 
 nix_path, target_path, temp_path = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -126,7 +129,7 @@ with open(temp_path, 'w') as f:
     write_toml(merged, f)
 PYEOF
 
-    if [ $? -eq 0 ] && [ -s "$temp_file" ] && python3 -c "import tomllib; tomllib.load(open('$temp_file','rb'))" 2>/dev/null; then
+    if [ "$py_ok" = true ] && [ -s "$temp_file" ] && python3 -c "import tomllib; tomllib.load(open('$temp_file','rb'))" 2>/dev/null; then
         mv "$temp_file" "$target_file"
     else
         rm -f "$temp_file"
@@ -151,3 +154,5 @@ fi
 
 merge_codex_mcp "$HOME/.codex/config.toml"
 [ -d "$HOME/.codex" ] && chown -R "$HOST_USER" "$HOME/.codex"
+
+devcell-event "up"

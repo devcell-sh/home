@@ -1,2 +1,4 @@
 #!/bin/sh
-exec nix-daemon
+
+devcell-event fork s6-notifyoncheck -d -s 500 -t 30000 \
+    nix-daemon

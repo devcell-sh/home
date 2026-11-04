@@ -1,0 +1,12 @@
+#!/bin/sh
+# x11vnc longrun: VNC server proxying the Xvfb display.
+# Depends on xvfb.
+
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+DISPLAY_NUM=99
+
+devcell-event fork gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    x11vnc -display :${DISPLAY_NUM} -forever -nevershared \
+    -passwd vnc -rfbport 5900 \
+    -desktop "${APP_NAME:-cell}" -pointer_mode 2 -repeat -xrandr

@@ -75,6 +75,19 @@ in
   };
 
   config = lib.mkIf (modCfg.enable && pkgs.stdenv.isLinux) {
+  devcell.s6.services = {
+    gui-config        = ../s6/gui-config;
+    xvfb              = ../s6/xvfb;
+    window-manager    = ../s6/window-manager;
+    xrdp              = ../s6/xrdp;
+    xrdp-chansrv      = ../s6/xrdp-chansrv;
+    x11vnc            = ../s6/x11vnc;
+    pulseaudio        = ../s6/pulseaudio;
+    dbus-session      = ../s6/dbus-session;
+    snixembed         = ../s6/snixembed;
+    wallpaper         = ../s6/wallpaper;
+    chromium-cleanup  = ../s6/chromium-cleanup;
+  };
   # LD_LIBRARY_PATH for non-nix binaries (Chromium, Electron, downloaded tools).
   # NIX_LD_LIBRARY_PATH points at /opt/devcell/.nix-ld-libs — a merged directory
   # with symlinks to every .so* from the profile closure (glibc excluded).

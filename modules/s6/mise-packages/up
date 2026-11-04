@@ -8,6 +8,8 @@ HOME="${SESSION_HOME:-/home/$HOST_USER}"
 
 command -v mise &>/dev/null || exit 0
 
+devcell-event "activating"
+
 conf_dir="${MISE_SYSTEM_CONFIG_DIR:-/etc/mise}/conf.d"
 conf="$conf_dir/devcell-packages.toml"
 user_mise="$HOME/.local/share/mise"
@@ -15,6 +17,7 @@ sha_file="$user_mise/.devcell-packages.sha"
 
 if [ -z "${DEVCELL_MISE_PACKAGES:-}" ]; then
     rm -f "$conf"
+    devcell-event "up"
     exit 0
 fi
 mkdir -p "$conf_dir"
@@ -22,19 +25,22 @@ printf '%s\n' "$DEVCELL_MISE_PACKAGES" > "$conf"
 
 sha=$(printf '%s' "$DEVCELL_MISE_PACKAGES" | sha256sum | cut -d' ' -f1)
 if [ "$(cat "$sha_file" 2>/dev/null)" = "$sha" ]; then
-    echo "mise-packages: unchanged, skipping install"
+    echo "unchanged, skipping install" | devcell-event pipe
+    devcell-event "up"
     exit 0
 fi
 
 tools=$(printf '%s\n' "$DEVCELL_MISE_PACKAGES" | sed -n 's/^"\([^"]*\)" = .*/\1/p' | tr '\n' ' ')
-echo "mise-packages: installing $tools"
+echo "installing $tools" | devcell-event pipe
 # shellcheck disable=SC2086
 if out=$(cd / && MISE_DATA_DIR="$user_mise" HOME="$HOME" USER="$HOST_USER" mise install -y $tools 2>&1); then
     mkdir -p "$user_mise"
     echo "$sha" > "$sha_file"
 else
-    echo "mise-packages: install failed; these tools are missing" >&2
-    echo "  pipx: tools need the python module (uv), npm: tools need the node module." >&2
+    devcell-event "warn" "install failed; these tools are missing"
+    devcell-event "warn" "pipx: tools need the python module (uv), npm: tools need the node module"
     printf '%s\n' "$out" >&2
 fi
 [ -d "$user_mise" ] && chown -R "$HOST_USER" "$user_mise" 2>/dev/null
+
+devcell-event "up"

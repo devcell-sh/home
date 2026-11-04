@@ -9,6 +9,8 @@ SESSION_HOME="${SESSION_HOME:-/home/${HOST_USER:-devcell}}"
 
 [ -d "$SESSION_HOME" ] || exit 0
 
+devcell-event "activating"
+
 find "$SESSION_HOME" -maxdepth 4 -type l \
     -not -path "*/tmp/*" \
     -not -path "$SESSION_HOME/.config/devcell/*" \
@@ -20,3 +22,5 @@ find "$SESSION_HOME" -maxdepth 4 -type l \
         fi
     ;; esac
 done
+
+devcell-event "up"

@@ -1,0 +1,38 @@
+#!/bin/sh
+# window-manager longrun: icewm or fluxbox desktop WM.
+# Depends on xvfb. Signals readiness via s6-notifyoncheck once the WM
+# registers its EWMH properties on the root window.
+
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+DISPLAY_NUM=99
+export DISPLAY=:${DISPLAY_NUM}
+
+if [ -z "$DEVCELL_WM" ]; then
+    if [ -f "$DEVCELL_HOME/.config/devcell/window-manager" ]; then
+        DEVCELL_WM=$(cat "$DEVCELL_HOME/.config/devcell/window-manager")
+    else
+        DEVCELL_WM="icewm"
+    fi
+fi
+
+case "$DEVCELL_WM" in
+  fluxbox)
+    FLUXBOX_RC=""
+    [ -f /tmp/fluxbox-init ] && FLUXBOX_RC="-rc /tmp/fluxbox-init"
+    # shellcheck disable=SC2086
+    devcell-event fork s6-notifyoncheck -d -s 200 -t 10000 \
+        gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+        fluxbox $FLUXBOX_RC
+    ;;
+  *)
+    ICEWM_CFG=""
+    [ -f /tmp/icewm-preferences ] && ICEWM_CFG="--config=/tmp/icewm-preferences"
+    # shellcheck disable=SC2086
+    devcell-event fork s6-notifyoncheck -d -s 200 -t 10000 \
+        gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+        env ICEWM_PRIVCFG="$DEVCELL_HOME/.icewm" \
+        icewm $ICEWM_CFG
+    ;;
+esac

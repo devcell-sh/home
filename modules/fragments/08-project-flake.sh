@@ -45,8 +45,16 @@ if [ -f "$_hash_file" ] && [ "$(cat "$_hash_file" 2>/dev/null)" = "$_flake_hash"
 fi
 
 # libgit2 (used by nix flake eval) rejects bind-mounted repos not owned by
-# the current user. Mark the project dir as safe for the session user.
-gosu "$HOST_USER" git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
+# the current user. Mark all project mount paths as safe for the session user.
+if [ -n "${DEVCELL_PROJECT_MOUNTS:-}" ]; then
+    IFS=: read -ra _mounts <<< "$DEVCELL_PROJECT_MOUNTS"
+    for _m in "${_mounts[@]}"; do
+        [ -n "$_m" ] && gosu "$HOST_USER" git config --global --add safe.directory "$_m" 2>/dev/null || true
+    done
+    unset _mounts _m
+else
+    gosu "$HOST_USER" git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
+fi
 
 log "project-flake: installing packages from $PROJECT_DIR/flake.nix..."
 

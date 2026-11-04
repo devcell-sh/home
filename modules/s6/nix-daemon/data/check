@@ -1,0 +1,2 @@
+#!/bin/sh
+test -S /nix/var/nix/daemon-socket/socket

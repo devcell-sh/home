@@ -1,0 +1,3 @@
+#!/bin/sh
+DISPLAY=:99 xdotool search --class icewm >/dev/null 2>&1 || \
+DISPLAY=:99 xdotool search --class fluxbox >/dev/null 2>&1

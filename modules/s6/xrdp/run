@@ -1,0 +1,10 @@
+#!/bin/sh
+# xrdp longrun: RDP gateway to the VNC session.
+# Depends on xvfb. Config prepared by gui-config oneshot.
+
+
+XRDP_CFG="/tmp/xrdp/xrdp.ini"
+[ -f "$XRDP_CFG" ] || exit 0
+
+devcell-event fork env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    xrdp --nodaemon --config "$XRDP_CFG"

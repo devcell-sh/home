@@ -1,13 +1,18 @@
 #!/bin/sh
 set -e
 
+devcell-event "activating"
+
 # mise: runtime version manager setup. Replaces 10-mise.sh fragment.
 
 DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
 HOST_USER="${HOST_USER:-$(id -un)}"
 HOME="${SESSION_HOME:-$HOME}"
 
-command -v mise >/dev/null 2>&1 || exit 0
+if ! command -v mise >/dev/null 2>&1; then
+    devcell-event "up"
+    exit 0
+fi
 
 # Copy .tool-versions to session user home
 if [ -f /etc/devcell/tool-versions ]; then
@@ -59,7 +64,7 @@ if [ -f "$HOME/.tool-versions" ]; then
         chown -R "$HOST_USER" "$user_mise"
 
         MISE_DATA_DIR="$user_mise" HOME="$HOME" "$mise_bin" reshim 2>&1 || \
-            echo "mise reshim failed" >&2
+            devcell-event "warn" "reshim failed"
 
         [ -d "$HOME/.local/state/mise" ] && chown -R "$HOST_USER" "$HOME/.local/state/mise"
         [ -d "$HOME/.cache/mise" ] && chown -R "$HOST_USER" "$HOME/.cache/mise"
@@ -83,3 +88,5 @@ if [ -n "$APP_NAME" ] && [ -f "$workspace/.tool-versions" ]; then
         echo "$ws_sha" > "$user_mise/.tv-workspace.sha"
     fi
 fi
+
+devcell-event "up"

@@ -10,6 +10,8 @@ if [ -z "$HM_PROFILE" ] || [ ! -d "$HM_PROFILE" ]; then
     exit 0
 fi
 
+devcell-event "activating"
+
 HM_PROFILE_HASH=$(basename "$HM_PROFILE" | cut -d- -f1)
 HM_GENERATION=$(readlink -f "$DEVCELL_HOME/.local/state/nix/profiles/home-manager" 2>/dev/null)
 
@@ -45,5 +47,7 @@ done
 _unique_hashes=$(echo "$_hash_list" | wc -w)
 
 if [ "$_unique_hashes" -gt 1 ]; then
-    echo "gcroot: drift detected — $_unique_hashes unique profile hashes across $_root_count roots" >&2
+    devcell-event "warn" "drift detected: $_unique_hashes unique profile hashes across $_root_count roots"
 fi
+
+devcell-event "up"

@@ -1,0 +1,19 @@
+#!/bin/sh
+
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+SESSION_HOME="${SESSION_HOME:-/home/$HOST_USER}"
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+_PROFILE="$DEVCELL_HOME/.local/state/nix/profiles/profile"
+
+_UID=$(id -u "$HOST_USER")
+XDG_RUNTIME_DIR="/run/user/$_UID"
+_DBUS_SOCKET="$XDG_RUNTIME_DIR/bus"
+
+rm -f "$_DBUS_SOCKET"
+
+devcell-event fork s6-notifyoncheck -d -s 200 -t 10000 \
+    gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    dbus-daemon \
+    --config-file="$_PROFILE/share/dbus-1/session.conf" \
+    --nofork --address="unix:path=$_DBUS_SOCKET"

@@ -4,6 +4,8 @@ set -e
 # antigravity: merge Antigravity CLI MCP servers into mcp_config.json.
 # Replaces 31-antigravity.sh fragment.
 
+devcell-event "activating"
+
 HOST_USER="${HOST_USER:-$(id -un)}"
 HOME="${SESSION_HOME:-/home/$HOST_USER}"
 
@@ -23,7 +25,7 @@ merge_antigravity_mcp() {
     [ -f "$nix_file" ] || return 0
 
     if ! jq empty "$nix_file" 2>/dev/null; then
-        echo "antigravity: nix-mcp-servers.json is invalid JSON, skipping" >&2
+        devcell-event "warn" "nix-mcp-servers.json is invalid JSON, skipping"
         return 1
     fi
 
@@ -44,7 +46,7 @@ merge_antigravity_mcp() {
     ' "$nix_file" > "$filtered_file" 2>/dev/null
     if ! [ -s "$filtered_file" ] || ! jq empty "$filtered_file" 2>/dev/null; then
         rm -f "$filtered_file"
-        echo "antigravity: failed to filter nix MCP servers, skipping" >&2
+        devcell-event "warn" "failed to filter nix MCP servers, skipping"
         return 1
     fi
 
@@ -66,7 +68,8 @@ merge_antigravity_mcp() {
     fi
 
     if ! jq empty "$target_file" 2>/dev/null; then
-        local corrupt_bak="${target_file}.corrupt-$(date +%Y%m%d-%H%M%S)"
+        local corrupt_bak
+        corrupt_bak="${target_file}.corrupt-$(date +%Y%m%d-%H%M%S)"
         cp "$target_file" "$corrupt_bak"
         local temp_file
         temp_file=$(mktemp)
@@ -86,20 +89,20 @@ merge_antigravity_mcp() {
     if [ "$backup_before_merge" = "true" ]; then
         backup_file="${target_file}.backup-$(date +%Y%m%d-%H%M%S)"
         cp "$target_file" "$backup_file"
-        ls -t "${target_file}.backup-"* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+        find "$(dirname "${target_file}")" -maxdepth 1 -name "$(basename "${target_file}").backup-*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2- | xargs rm -f 2>/dev/null || true
     fi
 
     local temp_file
     temp_file=$(mktemp)
-    jq -s '
+    if jq -s '
       .[0] as $existing |
       .[1].mcpServers as $nix |
       (($existing.mcpServers // {}) | to_entries |
         map(select(.value.command == null or (.value.command | (startswith("/opt/devcell/") or startswith("/nix/store/")) | not))) |
         from_entries) as $cleaned |
       $existing | .mcpServers = ($cleaned + ($nix // {}))
-    ' "$target_file" "$filtered_file" > "$temp_file" 2>/dev/null
-    if [ $? -eq 0 ] && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
+    ' "$target_file" "$filtered_file" > "$temp_file" 2>/dev/null \
+       && [ -s "$temp_file" ] && jq empty "$temp_file" 2>/dev/null; then
         mv "$temp_file" "$target_file"
     else
         rm -f "$temp_file"
@@ -114,3 +117,5 @@ merge_antigravity_mcp() {
 
 merge_antigravity_mcp "$HOME/.gemini/config/mcp_config.json"
 [ -d "$HOME/.gemini/config" ] && chown -R "$HOST_USER" "$HOME/.gemini/config"
+
+devcell-event "up"

@@ -1,119 +1,132 @@
-# s6-darwin-renderer.nix — render s6 service dirs for macOS from modules/s6/
+# s6-darwin-renderer.nix — render s6 service dirs for macOS
 #
-# Imported by hosts/macos/default.nix. Runs as a nix-darwin activation script
-# that copies service definitions to /etc/s6/services/ where s6-svscan reads them.
-{ pkgs, lib, ... }:
+# Imported by base.nix (gated on isDarwin). Collects service directories
+# registered via config.devcell.s6.services, compiles them at build time
+# via s6-rc-compile, and installs both the source tree (for up.sh scripts)
+# and the compiled database to /etc/s6-rc/ where s6-rc activation reads them.
+#
+# Only services registered by enabled modules are included: desktop services
+# (gui-config, xvfb, etc.) are never registered on darwin because
+# desktop/default.nix gates on isLinux.
+{ pkgs, lib, config, ... }:
 
 let
-  s6Root = ./s6;
+  services = config.devcell.s6.services;
 
-  # Services that only run on Linux (excluded from macOS rendering)
-  linuxOnlyServices = [
-    "env-setup"
-    "gui-config"
-    "xvfb"
-    "dbus-session"
-    "window-manager"
-    "x11vnc"
-    "pulseaudio"
-    "xrdp"
-    "xrdp-chansrv"
-  ];
-
-  # Build the rendered service tree as a derivation
   s6Services = pkgs.runCommand "devcell-s6-darwin-services" {
-    src = s6Root;
-  } ''
-    mkdir -p $out
+    nativeBuildInputs = [ pkgs.s6-rc ];
+  } (''
+    SOURCE="$out/source"
+    mkdir -p "$SOURCE"
+  '' + lib.concatStringsSep "\n" (lib.mapAttrsToList (name: src: ''
+    svc_dir="${src}"
+    svc_name="${name}"
 
-    for svc_dir in $src/*/; do
-      svc_name=$(basename "$svc_dir")
+    mkdir -p "$SOURCE/$svc_name"
 
-      # Skip the user bundle (rendered separately below)
-      [ "$svc_name" = "user" ] && continue
+    # Copy type file
+    if [ -f "$svc_dir/type" ]; then
+      cp "$svc_dir/type" "$SOURCE/$svc_name/type"
+    fi
 
-      # Skip Linux-only services
-      case "$svc_name" in
-        ${lib.concatMapStringsSep "|" (s: s) linuxOnlyServices}) continue ;;
-      esac
+    # Copy notification-fd if present (readiness protocol for longruns)
+    if [ -f "$svc_dir/notification-fd" ]; then
+      cp "$svc_dir/notification-fd" "$SOURCE/$svc_name/notification-fd"
+    fi
 
-      mkdir -p "$out/$svc_name"
+    # Dependencies: copy dependencies.d/, filtering out services not in the set
+    if [ -d "$svc_dir/dependencies.d" ]; then
+      mkdir -p "$SOURCE/$svc_name/dependencies.d"
+      for dep in "$svc_dir/dependencies.d"/*; do
+        dep_name=$(basename "$dep")
+        # Only include deps that are registered services
+        case "$dep_name" in
+          ${lib.concatMapStringsSep "|" (s: s) (builtins.attrNames services)}) touch "$SOURCE/$svc_name/dependencies.d/$dep_name" ;;
+        esac
+      done
+    fi
 
-      # Copy type file
-      if [ -f "$svc_dir/type" ]; then
-        cp "$svc_dir/type" "$out/$svc_name/type"
-      fi
+    # Data dir (contains check scripts for s6-notifyoncheck readiness)
+    if [ -d "$svc_dir/data" ]; then
+      cp -r "$svc_dir/data" "$SOURCE/$svc_name/data"
+      chmod -R +x "$SOURCE/$svc_name/data"
+    fi
 
-      # Copy notification-fd if present
-      if [ -f "$svc_dir/notification-fd" ]; then
-        cp "$svc_dir/notification-fd" "$out/$svc_name/notification-fd"
-      fi
+    # Log dir (s6-rc-compile creates a <name>-log pipeline automatically)
+    if [ -d "$svc_dir/log" ]; then
+      cp -r "$svc_dir/log" "$SOURCE/$svc_name/log"
+      chmod +x "$SOURCE/$svc_name/log/run"
+    fi
 
-      # Dependencies: copy dependencies.d/, filtering out Linux-only deps
-      if [ -d "$svc_dir/dependencies.d" ]; then
-        mkdir -p "$out/$svc_name/dependencies.d"
-        for dep in "$svc_dir/dependencies.d"/*; do
-          dep_name=$(basename "$dep")
-          case "$dep_name" in
-            ${lib.concatMapStringsSep "|" (s: s) linuxOnlyServices}) continue ;;
-          esac
-          touch "$out/$svc_name/dependencies.d/$dep_name"
-        done
-      fi
+    svc_type=""
+    [ -f "$SOURCE/$svc_name/type" ] && svc_type=$(cat "$SOURCE/$svc_name/type")
 
-      # Scripts: prefer darwin/ subdir, fall back to shared
-      if [ -d "$svc_dir/darwin" ]; then
-        # Use darwin-specific scripts
-        for script in "$svc_dir/darwin"/*; do
-          [ -f "$script" ] || continue
-          cp "$script" "$out/$svc_name/$(basename "$script")"
-          chmod +x "$out/$svc_name/$(basename "$script")"
-        done
-      else
-        # Use shared scripts
-        for script in up run finish down; do
-          if [ -f "$svc_dir/$script" ]; then
-            cp "$svc_dir/$script" "$out/$svc_name/$script"
-            chmod +x "$out/$svc_name/$script"
-          fi
-        done
-      fi
-    done
+    # Scripts: prefer darwin/ subdir, fall back to shared
+    if [ -d "$svc_dir/darwin" ] && [ "$(ls -A "$svc_dir/darwin" 2>/dev/null)" ]; then
+      for script in "$svc_dir/darwin"/*; do
+        [ -f "$script" ] || continue
+        cp "$script" "$SOURCE/$svc_name/$(basename "$script")"
+        chmod +x "$SOURCE/$svc_name/$(basename "$script")"
+      done
+    else
+      for script in up run finish down; do
+        if [ -f "$svc_dir/$script" ]; then
+          cp "$svc_dir/$script" "$SOURCE/$svc_name/$script"
+          chmod +x "$SOURCE/$svc_name/$script"
+        fi
+      done
+    fi
 
-    # Generate darwin-specific user bundle
-    mkdir -p "$out/user"
-    echo "bundle" > "$out/user/type"
-    mkdir -p "$out/user/contents.d"
-    for svc_dir in "$out"/*/; do
-      svc_name=$(basename "$svc_dir")
-      [ "$svc_name" = "user" ] && continue
-      touch "$out/user/contents.d/$svc_name"
-    done
-  '';
+    # s6-rc-compile requires oneshot "up" to be an argv (execline-parsed),
+    # not a multi-line shell script. Rename shell up -> up.sh, write an
+    # execline-compatible up that calls the shell script.
+    if [ "$svc_type" = "oneshot" ] && [ -f "$SOURCE/$svc_name/up" ]; then
+      mv "$SOURCE/$svc_name/up" "$SOURCE/$svc_name/up.sh"
+      chmod +x "$SOURCE/$svc_name/up.sh"
+      echo "export RC_NAME $svc_name /etc/s6-rc/source/$svc_name/up.sh" > "$SOURCE/$svc_name/up"
+    fi
 
-in {
-  # Activation script: install rendered s6 services and compile the database
-  system.activationScripts.postActivation.text = ''
-    echo "s6-darwin-renderer: installing service tree..."
+    # Same for oneshot "down" if present
+    if [ "$svc_type" = "oneshot" ] && [ -f "$SOURCE/$svc_name/down" ]; then
+      mv "$SOURCE/$svc_name/down" "$SOURCE/$svc_name/down.sh"
+      chmod +x "$SOURCE/$svc_name/down.sh"
+      echo "/etc/s6-rc/source/$svc_name/down.sh" > "$SOURCE/$svc_name/down"
+    fi
+  '') services) + ''
 
-    # Clean and populate /etc/s6/services from the nix-built tree
-    rm -rf /etc/s6/services
-    mkdir -p /etc/s6/services
+    # Generate user bundle containing all registered services
+    mkdir -p "$SOURCE/user"
+    echo "bundle" > "$SOURCE/user/type"
+    mkdir -p "$SOURCE/user/contents.d"
+  '' + lib.concatStringsSep "\n" (map (name: ''
+    touch "$SOURCE/user/contents.d/${name}"
+  '') (builtins.attrNames services)) + ''
 
-    # Copy each service dir (can't symlink: s6-svscan needs writable dirs for supervise/)
-    for svc_dir in ${s6Services}/*/; do
-      svc_name=$(basename "$svc_dir")
-      cp -r "$svc_dir" "/etc/s6/services/$svc_name"
-      chmod -R u+w "/etc/s6/services/$svc_name"
-    done
+    # Compile the service database
+    s6-rc-compile "$out/compiled" "$SOURCE"
+  '');
 
-    # For longruns, s6-svscan needs a supervise/ dir it can write to
-    for svc_dir in /etc/s6/services/*/; do
-      if [ -f "$svc_dir/type" ] && [ "$(cat "$svc_dir/type")" = "longrun" ]; then
-        mkdir -p "$svc_dir/supervise"
-      fi
-    done
+in lib.mkIf pkgs.stdenv.isDarwin {
+  # Stage the rendered service tree into the home directory.
+  home.file.".config/devcell/s6-services".source = s6Services;
 
-    echo "s6-darwin-renderer: $(find /etc/s6/services/ -mindepth 1 -maxdepth 1 -type d | wc -l) services installed"
+  # Activation: install s6-rc source and compiled database.
+  # Can't symlink: s6-svscan needs writable dirs for supervise/.
+  home.activation.stageS6Services = lib.hm.dag.entryAfter ["writeBoundary"] ''
+    export PATH="/usr/bin:/bin:$PATH"
+    if [ -d "$HOME/.config/devcell/s6-services" ]; then
+      $DRY_RUN_CMD sudo rm -rf /etc/s6-rc/source /etc/s6-rc/compiled
+      $DRY_RUN_CMD sudo mkdir -p /etc/s6-rc/source
+
+      for svc_dir in "$HOME/.config/devcell/s6-services/source"/*/; do
+        svc_name=$(basename "$svc_dir")
+        $DRY_RUN_CMD sudo cp -r "$svc_dir" "/etc/s6-rc/source/$svc_name"
+        $DRY_RUN_CMD sudo chmod -R u+w "/etc/s6-rc/source/$svc_name"
+      done
+
+      $DRY_RUN_CMD sudo cp -r "$HOME/.config/devcell/s6-services/compiled" /etc/s6-rc/compiled
+      $DRY_RUN_CMD sudo chmod -R u+w /etc/s6-rc/compiled
+      echo "s6-darwin-renderer: $(find /etc/s6-rc/source/ -mindepth 1 -maxdepth 1 -type d | wc -l) services installed, database compiled"
+    fi
   '';
 }

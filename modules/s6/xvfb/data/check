@@ -1,0 +1,2 @@
+#!/bin/sh
+test -e /tmp/.X11-unix/X99

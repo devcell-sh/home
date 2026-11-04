@@ -16,6 +16,10 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    devcell.s6.services = {
+      wireguard = ./s6/wireguard;
+    };
+
     home.packages = with pkgs; [
       wireguard-tools  # wg, wg-quick (use: wg-quick up <conf>)
       boringtun        # userspace WireGuard (use: WG_QUICK_USERSPACE_IMPLEMENTATION=boringtun-cli)

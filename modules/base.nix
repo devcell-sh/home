@@ -35,6 +35,40 @@ let
           _emit "failed" "$OUTPUT"
         fi
         ;;
+      fork)
+        # For longruns: emit "activating", fork a watcher that polls
+        # s6-svstat until the daemon is confirmed running, then exec
+        # the daemon. The watcher emits "up" or "failed".
+        shift
+        _emit "activating"
+        # Pre-open the docker-logs pipe as fd 8 so the watcher can
+        # use it after PID 1 execs to gosu (ownership change on
+        # /proc/1/fd/1 would block later opens under yama scope 1).
+        if [ "$FD" != "/dev/null" ]; then
+          exec 8>"$FD" 2>/dev/null || true
+        fi
+        (
+          if [ -e /proc/self/fd/8 ]; then
+            FD="/proc/self/fd/8"
+          fi
+          _svc="/run/service/$SERVICE"
+          _tries=0
+          sleep 0.3
+          while [ $_tries -lt 60 ]; do
+            if [ -d "$_svc/supervise" ]; then
+              _st=$(s6-svstat "$_svc" 2>/dev/null) || true
+              case "$_st" in
+                up*) _emit "up"; exit 0 ;;
+                down*) _emit "failed" "service exited"; exit 0 ;;
+              esac
+            fi
+            sleep 0.5
+            _tries=$((_tries + 1))
+          done
+          _emit "warn" "readiness timeout"
+        ) &
+        exec "$@"
+        ;;
       pipe)
         while IFS= read -r line; do
           $JQ -nc \
@@ -56,8 +90,25 @@ in {
     ./git.nix
     ./shell.nix
     ./llm
+    ./s6-options.nix
     ./s6-linux-renderer.nix
+    ./s6-darwin-renderer.nix
   ];
+
+  # Base s6 services: always present in every stack.
+  devcell.s6.services = {
+    base-init     = ./s6/base-init;
+    system-fixups = ./s6/system-fixups;
+    shell-rc      = ./s6/shell-rc;
+    homedir       = ./s6/homedir;
+    nix-daemon    = ./s6/nix-daemon;
+    gcroot        = ./s6/gcroot;
+    project-flake = ./s6/project-flake;
+    nix-packages  = ./s6/nix-packages;
+    secrets       = ./s6/secrets;
+  } // lib.optionalAttrs pkgs.stdenv.isLinux {
+    env-setup     = ./s6/env-setup;
+  };
 
   # Standalone activations (WSL cells) must leave the `home-manager` CLI on
   # PATH so the environment can be re-switched and its version asserted —

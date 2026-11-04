@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+devcell-event "activating"
+
 # shell-rc: generate shell rc files for the session user.
 # Runs as root. Replaces 05-shell-rc.sh fragment.
 #
@@ -91,3 +93,5 @@ for file in .profile .bashrc; do
     fi
     chown "$HOST_USER" "$HOME/$file"
 done
+
+devcell-event "up"

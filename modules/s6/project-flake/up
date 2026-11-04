@@ -12,9 +12,11 @@ PROJECT_DIR="${WORKSPACE:-}"
 [ -f "$PROJECT_DIR/flake.nix" ] || exit 0
 
 if [ "${DEVCELL_FLAKE_TRUST:-}" != "1" ]; then
-    echo "project-flake: found $PROJECT_DIR/flake.nix but DEVCELL_FLAKE_TRUST not set — skipping" >&2
+    devcell-event "warn" "found $PROJECT_DIR/flake.nix but DEVCELL_FLAKE_TRUST not set, skipping"
     exit 0
 fi
+
+devcell-event "activating"
 
 export NIX_CONF_DIR="${NIX_CONF_DIR:-$DEVCELL_HOME/.config/nix}"
 
@@ -39,9 +41,17 @@ case "$(uname -s)-$(uname -m)" in
     *) _system="x86_64-linux" ;;
 esac
 
-# Mark project dir as git-safe for the session user
+# Mark all project mount paths as git-safe for the session user
 if command -v git >/dev/null 2>&1; then
-    su - "$HOST_USER" -c "git config --global --add safe.directory '$PROJECT_DIR'" 2>/dev/null || true
+    if [ -n "${DEVCELL_PROJECT_MOUNTS:-}" ]; then
+        IFS=: read -ra _mounts <<< "$DEVCELL_PROJECT_MOUNTS"
+        for _m in "${_mounts[@]}"; do
+            [ -n "$_m" ] && su - "$HOST_USER" -c "git config --global --add safe.directory '$_m'" 2>/dev/null || true
+        done
+        unset _mounts _m
+    else
+        su - "$HOST_USER" -c "git config --global --add safe.directory '$PROJECT_DIR'" 2>/dev/null || true
+    fi
 fi
 
 if [ -e "$FLAKE_PROFILE" ]; then
@@ -71,8 +81,11 @@ if [ "$_installed" = true ]; then
         ln -sfT "$_proj_store" "/nix/var/nix/gcroots/devcell/${_proj_hash}-project-profile"
     fi
 else
-    echo "project-flake: install failed" >&2
+    devcell-event "failed" "install failed"
     if [ "${DEVCELL_SKIP_FLAKE:-}" != "1" ]; then
+        devcell-event "failed" "flake install failed"
         exit 1
     fi
 fi
+
+devcell-event "up"

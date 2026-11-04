@@ -4,6 +4,8 @@ set -e
 # base-init (Linux): container bootstrap — user creation, device permissions,
 # directories, GPG isolation. Runs as root before all other services.
 
+devcell-event "activating"
+
 HOST_USER="${HOST_USER:-devcell}"
 SESSION_HOME="${SESSION_HOME:-/home/$HOST_USER}"
 DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
@@ -42,6 +44,14 @@ ln -sf "$DEVCELL_HOME/.local/bin/cell" "$SESSION_HOME/.local/bin/cell" 2>/dev/nu
 chown -h "$HOST_USER" "$SESSION_HOME/.local" "$SESSION_HOME/.local/bin" \
     "$SESSION_HOME/go" "$SESSION_HOME/go/bin" "$SESSION_HOME/tmp"
 
+# XDG_RUNTIME_DIR: per-user tmpfs for dbus, pulseaudio, wayland, etc.
+_UID=$(id -u "$HOST_USER")
+XDG_RUNTIME_DIR="/run/user/$_UID"
+mkdir -p "$XDG_RUNTIME_DIR"
+chown "$HOST_USER" "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+echo "$XDG_RUNTIME_DIR" > /etc/s6/env/XDG_RUNTIME_DIR
+
 # Isolate GPG per container (persistent $HOME shared across containers)
 GNUPGHOME="$SESSION_HOME/tmp/.gnupg"
 mkdir -p "$GNUPGHOME"
@@ -52,3 +62,5 @@ echo "$GNUPGHOME" > /etc/s6/env/GNUPGHOME
 
 # WebKit bwrap sandbox cannot run inside Docker (no CAP_SYS_ADMIN)
 echo "1" > /etc/s6/env/WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS
+
+devcell-event "up"

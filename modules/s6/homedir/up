@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+devcell-event "activating"
+
 # homedir: sync repo homedir and set browser env. Replaces 20-homedir.sh.
 
 DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
@@ -14,3 +16,5 @@ if [ -d "$REPO_HOMEDIR" ]; then
     rsync -a --copy-links --ignore-existing --exclude=.claude \
         --chown="$HOST_USER" "$REPO_HOMEDIR/" "$HOME/"
 fi
+
+devcell-event "up"

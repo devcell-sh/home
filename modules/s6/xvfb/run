@@ -1,0 +1,12 @@
+#!/bin/sh
+HOST_USER="${HOST_USER:-$(id -un)}"
+DISPLAY_NUM=99
+RESOLUTION="${DEVCELL_RESOLUTION:-1920x1080x24}"
+DPI="${DEVCELL_DPI:-96}"
+
+rm -f /tmp/.X${DISPLAY_NUM}-lock /tmp/.X11-unix/X${DISPLAY_NUM}
+
+devcell-event fork s6-notifyoncheck -d -s 200 -t 10000 \
+    gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+    Xvfb ":${DISPLAY_NUM}" -screen 0 "${RESOLUTION}" -dpi "${DPI}" \
+    +extension GLX +render +iglx

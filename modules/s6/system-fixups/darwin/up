@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+devcell-event "activating"
+
 # nix state dirs needed by nix CLI invocations.
 # macOS uses Determinate Nix which handles most of this, but ensure the
 # per-user and gcroot dirs exist for devcell's profile management.
@@ -19,3 +21,5 @@ chmod 1777 \
     /nix/var/nix/temproots \
     /nix/var/nix/userpool 2>/dev/null || true
 chmod 0755 /nix/var/nix/daemon-socket 2>/dev/null || true
+
+devcell-event "up"
