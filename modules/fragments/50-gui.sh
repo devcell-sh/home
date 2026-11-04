@@ -417,7 +417,7 @@ if [ -n "$XRDP_BIN" ]; then
         -e "s|^port=.*|port=3389|" \
         -e "s|^certificate=.*|certificate=$XRDP_CERT_DIR/cert.pem|" \
         -e "s|^key_file=.*|key_file=$XRDP_CERT_DIR/key.pem|" \
-        -e "s|^security_layer=.*|security_layer=none|" \
+        -e "s|^security_layer=.*|security_layer=negotiate|" \
         -e "s|^autorun=.*|autorun=vnc-any|" \
         -e "s|^max_bpp=.*|max_bpp=24|" \
         -e "s|^allow_channels=.*|allow_channels=true|" \
