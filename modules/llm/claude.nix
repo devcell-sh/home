@@ -178,11 +178,46 @@ in {
           fi
           rm -f "$_stripped"
         }
+        _merge_mcp_json() {
+          local _target="$1"
+          local _stripped; _stripped=$(mktemp)
+          jq '{mcpServers: ([(.mcpServers // {}) | to_entries[] |
+              select(.value.command != null) |
+              {key: .key, value: (.value | del(.enabled))}] | from_entries)}' \
+              "$_nix_file" > "$_stripped" 2>/dev/null
+          if ! [ -s "$_stripped" ] || ! jq empty "$_stripped" 2>/dev/null; then
+            rm -f "$_stripped"; return
+          fi
+          if [ -f "$_target" ] && jq empty "$_target" 2>/dev/null; then
+            local _tmp; _tmp=$(mktemp)
+            jq -s '
+              .[0] as $existing |
+              (.[1].mcpServers // {}) as $nixStdio |
+              (($existing.mcpServers // {}) | to_entries |
+                map(select(.value.command == null or (.value.command | (startswith("/opt/devcell/") or startswith("/nix/store/")) | not))) |
+                from_entries) as $cleaned |
+              $existing | .mcpServers = ($cleaned + $nixStdio)
+            ' "$_target" "$_stripped" > "$_tmp" 2>/dev/null
+            if [ $? -eq 0 ] && [ -s "$_tmp" ] && jq empty "$_tmp" 2>/dev/null; then
+              mv "$_tmp" "$_target"
+              echo "setupManagedClaude: merged stdio MCP servers into $_target"
+            else
+              rm -f "$_tmp"
+            fi
+          elif [ ! -f "$_target" ]; then
+            cp "$_stripped" "$_target" 2>/dev/null
+            echo "setupManagedClaude: created $_target with stdio MCP servers"
+          fi
+          rm -f "$_stripped"
+        }
         if [ -f "$_nix_file" ] && command -v jq &>/dev/null; then
           _merge_claude_mcp "$HOME/.claude.json"
+          _merge_mcp_json "$HOME/.mcp.json"
           for _user_home in /home/*; do
-            [ -d "$_user_home/.claude" ] && [ "$_user_home" != "$HOME" ] && \
+            if [ -d "$_user_home/.claude" ] && [ "$_user_home" != "$HOME" ]; then
               _merge_claude_mcp "$_user_home/.claude.json"
+              _merge_mcp_json "$_user_home/.mcp.json"
+            fi
           done
         fi
       ''
