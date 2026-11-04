@@ -869,6 +869,7 @@ in
         "MISE_SHARED_INSTALL_DIRS=/opt/devcell/.local/share/mise/installs"
         # Mesa 26.x software rendering — headless container, no GPU.
         # `mesa.drivers` is deprecated; everything lives in `mesa` (out) now.
+        "DISPLAY=:99"
         "LIBGL_ALWAYS_SOFTWARE=1"
         "GALLIUM_DRIVER=llvmpipe"
         "LIBGL_DRIVERS_PATH=/opt/devcell/.mesa-dri"

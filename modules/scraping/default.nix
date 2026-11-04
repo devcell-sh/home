@@ -30,7 +30,7 @@ let
   baseBrowsers = pkgs.playwright-driver.browsers.override {
     withFirefox = false;
     withWebkit = false;
-    withFfmpeg = false;
+    withFfmpeg = true;
   };
   browsers = pkgs.runCommandLocal "patchright-browsers" {} ''
     mkdir -p $out
@@ -317,6 +317,7 @@ SHIMEOF
   patchrightConfig = pkgs.writeTextFile {
     name = "patchright-mcp-config.json";
     text = builtins.toJSON {
+      browser.launchOptions.headless = false;
       browser.launchOptions.args = [
         "--use-gl=angle"
         "--use-angle=vulkan"
@@ -438,7 +439,7 @@ SHIMEOF
       Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
 
       // Patch permissions
-      const origQuery = window.navigator.permissions.query;
+      const origQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
       window.navigator.permissions.query = (params) =>
         params.name === 'notifications'
           ? Promise.resolve({ state: Notification.permission })
@@ -1644,7 +1645,7 @@ SHIMEOF
           --arg cmajor "$_CHROME_MAJOR" \
           --arg cfull "$_CHROME_FULL_VER" \
           '.browser.contextOptions.userAgent = $ua
-          | .browser.launchOptions.args = ((.browser.launchOptions.args // []) + ["--user-agent=" + $ua])
+          | .browser.launchOptions.args = ([(.browser.launchOptions.args // [])[] | select(startswith("--user-agent=") | not)] + ["--user-agent=" + $ua])
           | .browser.contextOptions.userAgentMetadata = (
             (.browser.contextOptions.userAgentMetadata // {}) + {
               "platform": $plat,
@@ -1679,11 +1680,11 @@ SHIMEOF
       _EXTRA_ARGS+=(--init-script "$_STEALTH_INIT")
 
       # Inject macOS fingerprint from $HOME/.playwright/fingerprint.json if present
-      # (written by `cell login` on macOS -- new layout). Merges userAgent into the
-      # runtime config and prepends a preamble init script that sets window.__cellFp
-      # before stealth-init.js runs.
+      # (written by `cell login` on macOS). Only applied when stealth platform is
+      # macOS -- on Linux the hardware signals (WebGL, codecs) can't match a Mac
+      # identity, and applying it creates detectable contradictions.
       _FP_FILE="$HOME/.playwright/fingerprint.json"
-      if [ -f "$_FP_FILE" ]; then
+      if [ "$_STEALTH_PLATFORM" = "macOS" ] && [ -f "$_FP_FILE" ]; then
         _UA=$(${pkgs.jq}/bin/jq -r '.userAgent // empty' "$_FP_FILE")
         if [ -n "$_UA" ]; then
           # Determine base config for merge: prefer already-generated _RUNTIME_CONFIG
@@ -1725,7 +1726,7 @@ SHIMEOF
                    {"brand": "Not?A_Brand", "version": "8.0.0.0"}
                  ] end)
                }
-             | .browser.launchOptions.args = ((.browser.launchOptions.args // []) + ["--user-agent=" + $ua])
+             | .browser.launchOptions.args = ([(.browser.launchOptions.args // [])[] | select(startswith("--user-agent=") | not)] + ["--user-agent=" + $ua])
             ' > "$_FP_CONFIG"
 
           # Replace any existing --config in _EXTRA_ARGS with the merged config.
@@ -1948,6 +1949,10 @@ in {
         # from share/patchright/ in the nix profile, which always resolves to
         # the latest generation. This avoids nix store hash pinning in MCP args.
       ];
+      env = {
+        # Fallback :99 for processes started before shell rc injects DISPLAY
+        DISPLAY = "\${DISPLAY:-:99}";
+      };
     };
 
     # Android Chrome CDP automation: connect to a remote CDP endpoint
