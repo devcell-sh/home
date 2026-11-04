@@ -5,6 +5,7 @@ tasks:
     desc: Run all tests
     cmds:
       - cmd: task test:lint || echo "SKIP test:lint (lint tools not installed)"
+      - cmd: task test:shellcheck || echo "SKIP test:shellcheck (shellcheck not installed)"
       - task: test:eval
       - task: test:unit
       - task: test:flake
@@ -25,6 +26,16 @@ tasks:
     cmds:
       - statix check .
       - deadnix --fail .
+
+  test:shellcheck:
+    desc: Lint shell scripts (s6 services)
+    preconditions:
+      - sh: command -v shellcheck
+        msg: "shellcheck not found: nix profile install nixpkgs#shellcheck"
+    cmds:
+      - cmd: |
+          find modules/s6 \( -name 'up' -o -name 'run' \) -not -path '*/data/*' \
+            | sort | xargs shellcheck
 
   test:eval:
     desc: Evaluate homeConfigurations across all platforms (linux, darwin, wsl, vagrant)

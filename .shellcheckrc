@@ -1,0 +1,3 @@
+# SC3043: "In POSIX sh, 'local' is undefined" — local is supported by
+#         dash, busybox ash, and every shell our containers actually run.
+disable=SC3043
