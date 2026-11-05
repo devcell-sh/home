@@ -1,63 +1,162 @@
 # community-home
 
-The shared Nix home environment for [devcell](https://github.com/DimmKirr/devcell) cells. This flake defines what a cell's `$HOME` contains: shells, editors, language toolchains, CLI tools, and the entrypoint glue that adapts it all to the container user at startup.
+Reproducible, AI-augmented developer environments as a Nix flake. Pick a stack, get every runtime, service, and AI coding tool you need: pinned, composable, running inside a container.
 
-The layout maps to how devcell composes environments. `modules/` holds toggleable capabilities (go, node, infra, graphics, vm, and so on), `stacks/` combines them into the image variants a cell can be built from, and `hosts/` carries the host-specific bits. `packages/` is for things nixpkgs doesn't have or has wrong.
+## Quick start
 
-devcell consumes this repo as a flake input: `github:devcell-sh/community-home` is the default when a cell has no local nixhome configured (override with `DEVCELL_NIXHOME_PATH` or the `[nix].nixhome` TOML key). You can also point home-manager at it directly; nothing in here is devcell-specific except the entrypoint.
+**With [devcell](https://github.com/devcell-sh/devcell):**
+
+```toml
+# .devcell.toml
+[cell]
+stack = "ultimate"
+```
+
+**As a standalone flake input:**
 
 ```nix
 inputs.community-home.url = "github:devcell-sh/community-home";
 ```
 
-Choose `stack = "ultimate"` for general development, cloud tools, browser
-automation and desktop support. Choose `stack = "bbb"` to add
-the specialist tools formerly bundled with ultimate: electronics/KiCad,
-Wine/Winetricks, QEMU, Swift, publishing, security/reverse engineering,
-Inkscape/GIMP and their MCPs, FFmpeg/yt-dlp, Kitty, wxWidgets, the FreeRDP client, the GTK4/WebKitGTK
-development stack for Wails 3/native UI builds, VPN tooling, and personal-service
-MCPs (social, travel, news, Plex and chat-completion providers).
+Nothing here is devcell-specific except the entrypoint. Point home-manager at it directly and override anything.
 
-`bbb` includes ultimate. Migrating an existing project that needs the previous
-tool selection only requires changing `[cell] stack = "bbb"` and rebuilding.
-Individual capability modules can also be added with `[cell] modules = [...]`.
-For a custom Nix composition, `devcell.modules.graphics.inkscape.enable = true`
-adds Inkscape back to ultimate. GIMP uses `devcell.modules.graphics.gimp.enable`;
-native UI headers use `devcell.modules.desktop.nativeUi.enable`, and FreeRDP
-uses `devcell.modules.desktop.rdpClient.enable`. These remain enabled by default
-in the standalone graphics/desktop modules. Kitty and wxWidgets use
-`devcell.modules.desktop.kitty.enable` and `devcell.modules.desktop.wxWidgets.enable`.
-FFmpeg, yt-dlp, the optional Iosevka/Cascadia Code fonts and `terraform-plugin-docs` are selected
-by `bbb`. MailSlurp and its MCP registration come from `qa-tools`, also in `bbb`.
-Draw.io desktop and its Electron runtime also live in `bbb`, controlled by
-`devcell.modules.graphics.drawio.enable`. Lightweight XML-to-PNG export belongs
-to the `drawio-diagram` skill and reuses Chromium; no exporter npm dependency is
-added to the stack.
-General `terraform-docs`, AWS tools, XTerm and VNC/RDP servers remain in ultimate.
-Other applications retain needed runtime libraries.
+## Stacks
 
-Interactive Chromium and Patchright automation share the browser from
-`playwright-driver.browsers`. The `chromium` command keeps its interactive profile,
-extension and CDP flags; it no longer adds a separate `pkgs.chromium` distribution.
-The current pinned bundle reports Chromium 141; the previous interactive build
-reported 149. Browser version updates now need to update the shared bundle.
+| Stack | What you get |
+|-------|-------------|
+| **base** | Shell, git, core CLI tools |
+| **dev** | base + stealth browser + infrastructure-as-code |
+| **go** | base + Go toolchain + build tools + IaC |
+| **node** | base + Node.js + stealth browser |
+| **python** | base + Python + stealth browser |
+| **fullstack** | base + Go + Node + Python + QA + browser + IaC |
+| **electronics** | base + KiCad + desktop |
+| **ultimate** | dev + Go + Node + Python + desktop GUI + graphics |
+| **bbb** | ultimate + electronics, security, media, publishing, VPN |
 
-The `playwright-android` MCP server connects to Android Chrome via CDP for
-mobile browser automation. It uses bare `mcp-server-patchright` with two
-env vars that patchright reads natively:
+Stacks are a starting point. This is Nix: everything is overridable.
 
-```sh
-# CDP endpoint (e.g. a remote proxy or local ADB forward)
-export PLAYWRIGHT_MCP_CDP_ENDPOINT="https://api-proxy.example.com/android/cdp"
+### Customizing
 
-# Auth headers for the CDP connection (optional)
-export PLAYWRIGHT_MCP_CDP_HEADERS="X-API-Key: your-key-here"
+Toggle modules on any stack via `.devcell.toml`:
+
+```toml
+[cell]
+stack = "ultimate"
+modules = ["electronics", "wine"]
 ```
 
-For local ADB devices, forward the port manually and point the endpoint at
-localhost: `adb forward tcp:9223 localabstract:chrome_devtools_remote` then
-`PLAYWRIGHT_MCP_CDP_ENDPOINT=http://127.0.0.1:9223`.
+Or compose directly in Nix. Import individual modules into your own home-manager configuration and set any option:
 
-The stack split changes future builds; it does not clean the shared Nix store
-or alter running containers. `task test:stacks` checks package/MCP boundaries,
-all stack variants, and that OCI layer hints cannot add unselected packages.
+```nix
+# in your home-manager modules list
+imports = [
+  "${community-home}/modules/base.nix"
+  "${community-home}/modules/go.nix"
+  "${community-home}/modules/desktop"
+];
+
+devcell.modules = {
+  graphics.inkscape.enable = true;
+  desktop.rdpClient.enable = true;
+  go.enable = true;
+};
+```
+
+The full module list lives in `modules/`. Each module is a standard Nix option interface: `enable`, configuration attributes, and package overrides. Write your own, drop it in `modules/`, and compose it into any stack.
+
+## Why community-home
+
+### Reproducible by default
+
+Nix flake inputs pin every tool. Same stack = same environment on your laptop, your colleague's machine, and CI. No "works on my machine," no dependency drift. Full container isolation, not just a shell overlay.
+
+### AI assistants with real tools
+
+Claude Code, Codex, Gemini CLI, and OpenCode come pre-wired with MCP servers for web scraping, Terraform, PostgreSQL, browser automation, and more. Your coding agent runs inside the container with all its dependencies pre-resolved.
+
+### Compose, don't configure
+
+Stacks from minimal (`base`) to maximal (`bbb`). Toggle individual modules in `.devcell.toml` or compose in pure Nix. Import into your own flake and override any option. Platform teams set the base stack; developers toggle what they need.
+
+### s6-rc service supervision
+
+PostgreSQL, nix-daemon, dbus, Xvfb, window manager, x11vnc, and xrdp are proper supervised services with dependency ordering, health checks, and structured boot events. No systemd. No PID 1 hacks. Boot progress is observable end-to-end via `devcell-event`.
+
+[Service dependency graph (34 services)](docs/s6-dependency-tree.md) | [Boot flow](docs/s6-flow.md)
+
+<details>
+<summary>Boot sequence (33 services, dependency-ordered)</summary>
+
+```json
+{"ts":"2026-11-04T12:00:01Z","scope":"service","service":"base-init","status":"up"}
+{"ts":"2026-11-04T12:00:01Z","scope":"service","service":"env-setup","status":"up"}
+{"ts":"2026-11-04T12:00:01Z","scope":"service","service":"secrets","status":"up"}
+{"ts":"2026-11-04T12:00:01Z","scope":"service","service":"system-fixups","status":"up"}
+{"ts":"2026-11-04T12:00:01Z","scope":"service","service":"shell-rc","status":"up"}
+{"ts":"2026-11-04T12:00:01Z","scope":"service","service":"nix-daemon","status":"activating"}
+{"ts":"2026-11-04T12:00:01Z","scope":"service","service":"pulseaudio","status":"activating"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"claude-config","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"codex-config","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"opencode-config","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"gemini-config","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"mcp-toggle","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"gui-config","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"mise","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"homedir","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"xvfb","status":"activating"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"nix-daemon","status":"up"}
+{"ts":"2026-11-04T12:00:02Z","scope":"service","service":"pulseaudio","status":"up"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"xvfb","status":"up"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"window-manager","status":"activating"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"dbus-session","status":"activating"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"x11vnc","status":"activating"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"xrdp","status":"activating"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"window-manager","status":"up"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"dbus-session","status":"up"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"x11vnc","status":"up"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"xrdp","status":"up"}
+{"ts":"2026-11-04T12:00:03Z","scope":"service","service":"xrdp-chansrv","status":"activating"}
+{"ts":"2026-11-04T12:00:04Z","scope":"service","service":"snixembed","status":"up"}
+{"ts":"2026-11-04T12:00:04Z","scope":"service","service":"xrdp-chansrv","status":"up"}
+{"ts":"2026-11-04T12:00:04Z","scope":"service","service":"wallpaper","status":"up"}
+{"ts":"2026-11-04T12:00:04Z","scope":"service","service":"project-flake","status":"up"}
+{"ts":"2026-11-04T12:00:04Z","scope":"service","service":"gcroot","status":"up"}
+```
+
+</details>
+
+### Full desktop in containers
+
+Access GUI applications via VNC or RDP. The entire desktop stack: Xvfb, window manager, VNC, and RDP, is supervised by s6-rc and baked into the container image. Inkscape, KiCad, and other GUI tools run on a virtual display with no host-side X11 required.
+
+![Empty container desktop accessible via VNC or RDP](docs/images/demo-1-desktop.png)
+
+![Inkscape editing an SVG inside the container desktop](docs/images/demo-3-inkscape.png)
+
+![KiCad schematic editor with an Arduino LED blink circuit inside the container desktop](docs/images/demo-4-kicad.png)
+
+### Passes bot protection out of the box
+
+Patchright + Chromium with anti-detection patches for AI-driven browser automation. Passes [bot.sannysoft.com](https://bot.sannysoft.com), [CreepJS](https://abrahamjuliot.github.io/creepjs/), and other fingerprinting tests without additional configuration.
+
+![Stealth browser passing bot detection on CreepJS and SannyBot](docs/images/demo-2-stealth-1.png)
+
+![Pixelscan bot detection: "You're Definitely a Human"](docs/images/demo-2-stealth-2.png)
+
+## Layout
+
+```
+modules/   Toggleable capabilities (go, node, infra, scraping, desktop, llm, ...)
+stacks/    Named combinations of modules (base, dev, ultimate, bbb, ...)
+hosts/     Host-specific bits (macOS, Linux)
+packages/  Things nixpkgs doesn't have or has wrong
+```
+
+## Contributing
+
+Fork, add a module in `modules/`, register it in your stack, run `task test`. CI validates with statix, deadnix, nixfmt, shellcheck, and `nix flake check` across all platforms.
+
+## License
+
+[Apache-2.0](LICENSE)
