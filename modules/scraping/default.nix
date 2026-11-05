@@ -22,6 +22,13 @@ let
     "--disable-extensions-except=${extensionPathsCsv}"
   ];
 
+  # Cross-arch Chromium for stealth: on aarch64, fetch x86_64 Chromium from
+  # the nix binary cache so navigator.platform reports "Linux x86_64" (runs
+  # via Rosetta on macOS/Colima). SwiftShader is bundled in the x86_64 closure.
+  isAarch64 = pkgs.stdenv.hostPlatform.isAarch64;
+  pkgsX86 = if isAarch64 then import pkgs.path { system = "x86_64-linux"; } else null;
+  chromiumX86 = if isAarch64 then pkgsX86.chromium else null;
+  mesaX86 = if isAarch64 then pkgsX86.mesa else null;
 
   # Chromium browser from playwright-driver -- chromium only, no firefox/webkit/ffmpeg.
   # patchright-core reads browsers.json for expected revision (e.g. 1208) but nixpkgs
@@ -432,11 +439,11 @@ SHIMEOF
         Object.setPrototypeOf(fakeMimes, MimeTypeArray.prototype);
         Object.defineProperty(navigator, 'mimeTypes', { get: () => fakeMimes });
       }
-      // Spoof pdfViewerEnabled (headless=new has false)
-      Object.defineProperty(navigator, 'pdfViewerEnabled', { get: () => true, configurable: true });
+      // pdfViewerEnabled: DISABLED -- Pixelscan detects the getter override
+      // Object.defineProperty(navigator, 'pdfViewerEnabled', { get: () => true, configurable: true });
 
-      // Mock languages
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      // languages: DISABLED -- Pixelscan detects the getter override
+      // Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
 
       // Patch permissions
       const origQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
@@ -462,16 +469,16 @@ SHIMEOF
         });
       }
 
-      // Spoof navigator.platform from __cellStealth (always runs).
-      // __cellFp override below can supersede this when fingerprint.json is present.
-      if (window.__cellStealth) {
-        const _stealthNavPlatform = window.__cellStealth.platform === 'macOS' ? 'MacIntel'
-          : window.__cellStealth.arch === 'arm' ? 'Linux aarch64' : 'Linux x86_64';
-        Object.defineProperty(Navigator.prototype, 'platform', {
-          get: () => _stealthNavPlatform,
-          configurable: true
-        });
-      }
+      // navigator.platform JS override: DISABLED -- CDP CELL-329 handles this
+      // at the C++ level. Pixelscan detects the JS getter override.
+      // if (window.__cellStealth) {
+      //   const _stealthNavPlatform = window.__cellStealth.platform === 'macOS' ? 'MacIntel'
+      //     : window.__cellStealth.arch === 'arm' ? 'Linux aarch64' : 'Linux x86_64';
+      //   Object.defineProperty(Navigator.prototype, 'platform', {
+      //     get: () => _stealthNavPlatform,
+      //     configurable: true
+      //   });
+      // }
 
       // Spoof platform + userAgentData from cell login fingerprint.
       // window.__cellFp is injected by the patchright-mcp-cell preamble init script
@@ -556,8 +563,11 @@ SHIMEOF
       // 2026-09-03). Present a plausible hardware GPU consistent with the
       // Linux aarch64 identity instead: Mali via ANGLE-on-Vulkan, the shape
       // real Chrome reports on ARM SBCs/laptops.
-      const _wglVendor = 'Google Inc. (ARM)';
-      const _wglRenderer = 'ANGLE (ARM, Vulkan 1.3.0 (Mali-G610 (0x0000A867)), armv8 driver)';
+      const _isX86Stealth = window.__cellStealth && window.__cellStealth.arch !== 'arm';
+      const _wglVendor = _isX86Stealth ? 'Google Inc. (Intel)' : 'Google Inc. (ARM)';
+      const _wglRenderer = _isX86Stealth
+        ? 'ANGLE (Intel, Vulkan 1.3.0 (Intel(R) UHD Graphics 630 (0x00003E92)), Intel open-source Mesa driver)'
+        : 'ANGLE (ARM, Vulkan 1.3.0 (Mali-G610 (0x0000A867)), armv8 driver)';
       // Intel-realistic parameter overrides (SwiftShader defaults in comments)
       const _wglParams = {
         37445: _wglVendor,   // UNMASKED_VENDOR_WEBGL
@@ -718,7 +728,12 @@ SHIMEOF
         (function() {
           if (typeof WebGLRenderingContext !== 'undefined') {
             // CELL-70: must match main-thread _wglVendor / _wglRenderer above.
-            var params = {37445:'Google Inc. (ARM)',37446:'ANGLE (ARM, Vulkan 1.3.0 (Mali-G610 (0x0000A867)), armv8 driver)',7936:'WebKit',7937:'WebKit WebGL',3379:16384,34076:16384,34024:16384,36183:8};
+            var _isX86 = typeof __cellStealth !== 'undefined' && __cellStealth.arch !== 'arm';
+            var _wV = _isX86 ? 'Google Inc. (Intel)' : 'Google Inc. (ARM)';
+            var _wR = _isX86
+              ? 'ANGLE (Intel, Vulkan 1.3.0 (Intel(R) UHD Graphics 630 (0x00003E92)), Intel open-source Mesa driver)'
+              : 'ANGLE (ARM, Vulkan 1.3.0 (Mali-G610 (0x0000A867)), armv8 driver)';
+            var params = {37445:_wV,37446:_wR,7936:'WebKit',7937:'WebKit WebGL',3379:16384,34076:16384,34024:16384,36183:8};
             var params2 = Object.assign({}, params, {7938:'WebGL 2.0 (OpenGL ES 3.0 Chromium)',35724:'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)'});
             function patchGL(P) {
               var orig = P.prototype.getParameter;
@@ -1086,11 +1101,10 @@ SHIMEOF
         }
       }
 
-      // --- hardwareConcurrency: container CPU count leaks as bot signal ---
-      // Spoof to 8 (common mid-range laptop value).
-      Object.defineProperty(navigator, 'hardwareConcurrency', {
-        get: () => 8, configurable: true
-      });
+      // hardwareConcurrency: DISABLED -- Pixelscan detects the getter override
+      // Object.defineProperty(navigator, 'hardwareConcurrency', {
+      //   get: () => 8, configurable: true
+      // });
 
       // --- speechSynthesis.getVoices() returns [] on headless -- bot signal ---
       try { if (window.speechSynthesis) {
@@ -1571,6 +1585,8 @@ SHIMEOF
       export LD_LIBRARY_PATH="${runtimeLibPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
       # Mesa Lavapipe -- software Vulkan ICD for WebGL via ANGLE->Vulkan->lvp
       export VK_ICD_FILENAMES="${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json"
+      ${lib.optionalString isAarch64 ''# x86_64 Chromium path (aarch64 only, runs via Rosetta)
+      _CHROMIUM_X86="${chromiumX86}/bin/chromium"''}
 
       # Always use config and init-script from co-located share/ dir.
       # Strip any stale --config/--init-script from caller args (e.g. Claude Code
@@ -1617,6 +1633,15 @@ SHIMEOF
       # and must run BEFORE the fingerprint overlay so cell login can override.
       _STEALTH_ARCH="''${DEVCELL_STEALTH_ARCH:-arm}"
       _STEALTH_PLATFORM="''${DEVCELL_STEALTH_PLATFORM:-Linux}"
+      _EXEC_PATH_OVERRIDE=""
+      if [ -n "''${_CHROMIUM_X86:-}" ] && [ "$_STEALTH_ARCH" != "arm" ] && [ -x "$_CHROMIUM_X86" ]; then
+        if timeout 10 "$_CHROMIUM_X86" --version >/dev/null 2>&1; then
+          _EXEC_PATH_OVERRIDE="$_CHROMIUM_X86"
+          export VK_ICD_FILENAMES="${mesaX86}/share/vulkan/icd.d/lvp_icd.x86_64.json"
+        else
+          printf 'patchright-mcp-cell: WARNING: x86_64 Chromium failed to execute (no Rosetta?), falling back to native\n' >&2
+        fi
+      fi
       # Detect real Chromium version from the browser binary so UA + brands match.
       _CHROME_BIN=$(find "''${PLAYWRIGHT_BROWSERS_PATH:-/dev/null}" -name 'chrome' -type f 2>/dev/null | tail -1)
       _CHROME_FULL_VER="141.0.0.0"
@@ -1644,7 +1669,9 @@ SHIMEOF
           --arg ua "$_STEALTH_UA" \
           --arg cmajor "$_CHROME_MAJOR" \
           --arg cfull "$_CHROME_FULL_VER" \
-          '.browser.contextOptions.userAgent = $ua
+          --arg execpath "$_EXEC_PATH_OVERRIDE" \
+          '(if $execpath != "" then .browser.launchOptions.executablePath = $execpath else . end)
+          | .browser.contextOptions.userAgent = $ua
           | .browser.launchOptions.args = ([(.browser.launchOptions.args // [])[] | select(startswith("--user-agent=") | not)] + ["--user-agent=" + $ua])
           | .browser.contextOptions.userAgentMetadata = (
             (.browser.contextOptions.userAgentMetadata // {}) + {
@@ -1900,10 +1927,15 @@ SHIMEOF
       --remote-debugging-address=127.0.0.1 \
       --no-sandbox \
       --disable-infobars \
-      --disable-gpu \
+      --disable-gpu-compositing \
+      --enable-unsafe-swiftshader \
       --disable-dev-shm-usage \
       ${lib.concatStringsSep " " extensionArgs} \
       "$@"
+  '';
+
+  chromiumX86Wrapper = pkgs.writeShellScriptBin "chromium-x86" ''
+    exec "${chromiumX86}/bin/chromium" "$@"
   '';
 
 in {
@@ -1928,7 +1960,7 @@ in {
       patchrightMcpCell
       chromiumWrapper
       pkgs.android-tools  # adb: CDP forwarding to Android Chrome for playwright-android MCP
-    ];
+    ] ++ lib.optionals isAarch64 [ chromiumX86Wrapper ];
 
     home.sessionVariables = {
       # Both launchers use this browser bundle; Patchright adds its automation
