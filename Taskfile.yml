@@ -49,13 +49,30 @@ tasks:
           nix eval .#homeConfigurations."{{.ITEM}}".activationPackage.drvPath --raw > /dev/null
 
   test:unit:
-    desc: Run shell-based unit tests
-    vars:
-      TESTS:
-        sh: find tests -name 'test-*.sh' -not -name '*-e2e*' | sort
+    desc: Run bats unit tests
+    preconditions:
+      - sh: command -v bats
+        msg: "bats not found: nix profile install nixpkgs#bats"
     cmds:
-      - for: { var: TESTS }
-        cmd: bash {{.ITEM}}
+      - bats tests/*_test.bats
+
+  test:e2e:
+    desc: Run e2e tests (requires sudo, run inside container)
+    preconditions:
+      - sh: command -v bats
+        msg: "bats not found: nix profile install nixpkgs#bats"
+    cmds:
+      - bats tests/e2e/*.bats
+
+  test:e2e:demo:
+    desc: Visual feature demo (desktop, stealth browser, Inkscape, KiCad)
+    preconditions:
+      - sh: command -v uv
+        msg: "uv not found: nix profile install nixpkgs#uv"
+      - sh: command -v import
+        msg: "import (ImageMagick) not found"
+    cmds:
+      - uv run tests/demo/feature_demo_test.py
 
   test:flake:
     desc: Validate flake metadata and outputs structure

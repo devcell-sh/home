@@ -335,7 +335,7 @@
 
     homeConfigurations = mkAllConfigs // mkAllVagrantConfigs // mkAllDarwinVMConfigs // mkAllWslConfigs;
 
-    stackChecks = import ./tests/stack-split.nix { flake = self; };
+    stackChecks = import ./tests/fixtures/stack-split.nix { flake = self; };
 
     # ── cross-platform compatibility check ────────────────────────────────────
     # Two-phase check, both keyed by eval system (aarch64-linux, aarch64-darwin).

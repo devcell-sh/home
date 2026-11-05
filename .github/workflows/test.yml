@@ -16,7 +16,9 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Install dev tools
-        run: nix profile install nixpkgs#go-task nixpkgs#statix nixpkgs#deadnix nixpkgs#nixfmt-rfc-style nixpkgs#shellcheck
+        run: nix profile install nixpkgs#go-task nixpkgs#statix nixpkgs#deadnix nixpkgs#nixfmt-rfc-style nixpkgs#shellcheck nixpkgs#bats nixpkgs#bats.libraries.bats-support nixpkgs#bats.libraries.bats-assert
 
       - name: Run tests
-        run: task test
+        run: |
+          export BATS_LIB_PATH="$HOME/.local/state/nix/profiles/profile/share/bats"
+          task test
