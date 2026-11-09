@@ -43,6 +43,7 @@ in {
       drawio.enable = true;
       inkscape.enable = true;
       gimp.enable = true;
+      blender.enable = true;
     };
     plex.enable = true;
     news.enable = true;

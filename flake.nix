@@ -93,7 +93,7 @@
       electronics    = { description = "KiCad EDA, SPICE simulation, ESP32/Arduino dev, hardware sim, PCB MCP"; mcpServers = ["kicad-mcp"]; sizeMb = 800; };
       financial      = { description = "Yahoo Finance, SEC EDGAR, FRED — market data, filings, economic time series"; mcpServers = ["yahoo-finance" "edgartools" "mcp-fredapi" "firefly-iii"]; sizeMb = 500; };
       go             = { description = "Go toolchain: mise-managed runtime + golangci-lint, gopls, gotools"; mcpServers = []; sizeMb = 350; };
-      graphics       = { description = "Vector graphics (Inkscape), raster (GIMP), Draw.io headless; MCP for Inkscape + GIMP"; mcpServers = ["inkscape-mcp" "gimp-mcp"]; sizeMb = 900; };
+      graphics       = { description = "Vector graphics (Inkscape), raster (GIMP), 3D (Blender), Draw.io headless; MCP for Inkscape + GIMP + Blender"; mcpServers = ["inkscape-mcp" "gimp-mcp" "blender-mcp"]; sizeMb = 1400; };
       infra          = { description = "IaC + Cloud: Terraform/OpenTofu, AWS CLI v2, Helm, Packer, Porter, MCPs for AWS API/CloudWatch/OpenTofu/Notion"; mcpServers = ["aws-api" "cloudwatch" "opentofu" "notion-api"]; sizeMb = 1200; };
       news           = { description = "Inoreader RSS — feeds, articles, search, tagging"; mcpServers = ["inoreader"]; sizeMb = 50; };
       nixos          = { description = "Nix dev tooling: nix-tree, nix-diff, nixfmt, deadnix, statix, nom"; mcpServers = []; sizeMb = 30; };

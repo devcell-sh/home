@@ -1,4 +1,4 @@
-# graphics.nix — Graphics tools: Draw.io, Inkscape, GIMP + MCP servers
+# graphics.nix — Graphics tools: Draw.io, Inkscape, GIMP, Blender + MCP servers
 {
   pkgs,
   lib,
@@ -98,9 +98,125 @@
     fi
     exec ${bin}/gimp-mcp-server "$@"
   '';
+
+  # blender-mcp: Python MCP server bridging Blender with AI assistants.
+  # Two components: a Blender add-on (opens port 9876 inside Blender) and an
+  # MCP bridge (stdio server that Claude talks to, forwarding to port 9876).
+  # Source: https://github.com/ahujasid/mcp-for-blender
+  blender-mcp-src = pkgs.fetchFromGitHub {
+    owner = "ahujasid";
+    repo = "mcp-for-blender";
+    rev = "2e4b0bc294694b1570d76ed01be657c22e6d02a0";
+    hash = "sha256-Gf0J0NEkeiHptdcbJFZxj0uw1yV+cQded33EGkuecKk=";
+  };
+
+  blender-mcp = pkgs.python3Packages.buildPythonApplication {
+    pname = "mcp-for-blender";
+    version = "2.2.7";
+    src = blender-mcp-src;
+    pyproject = true;
+    build-system = [pkgs.python3Packages.setuptools pkgs.python3Packages.wheel];
+    dependencies = with pkgs.python3Packages; [
+      mcp    # Model Context Protocol SDK
+      httpx  # HTTP client
+    ];
+    doCheck = false;
+  };
+
+  # Blender add-on: opens the MCP socket server on port 9876 inside Blender.
+  # Installed to ~/.config/blender/<version>/scripts/addons/ so Blender loads it.
+  blender-mcp-addon = pkgs.stdenvNoCC.mkDerivation {
+    pname = "blender-mcp-addon";
+    version = "2.2.7";
+    src = blender-mcp-src;
+    installPhase = ''
+      mkdir -p $out
+      cp src/blender_mcp/bundled/addon.py $out/blender_mcp.py
+    '';
+  };
+
+  # Python script: configure Blender GPU preferences on first run.
+  # Probes for hardware accelerators (OptiX > HIP > oneAPI > Metal),
+  # falls back to CPU. Enables the blender_mcp add-on and saves prefs.
+  blender-gpu-setup = pkgs.writeText "blender-gpu-setup.py" ''
+    import bpy, sys
+
+    prefs = bpy.context.preferences
+    bpy.ops.preferences.addon_enable(module="blender_mcp")
+
+    try:
+        cycles = prefs.addons["cycles"].preferences
+    except KeyError:
+        print("blender-gpu-setup: Cycles add-on not available, skipping GPU config", file=sys.stderr)
+        bpy.ops.wm.save_userpref()
+        sys.exit(0)
+
+    chosen = None
+    for dev_type in ("OPTIX", "HIP", "ONEAPI", "METAL"):
+        try:
+            cycles.compute_device_type = dev_type
+            cycles.get_devices()
+            hw = [d for d in cycles.devices if d.type != "CPU"]
+            if hw:
+                for d in cycles.devices:
+                    d.use = True
+                chosen = dev_type
+                print(f"blender-gpu-setup: {dev_type} with {len(hw)} device(s)", file=sys.stderr)
+                break
+        except Exception:
+            continue
+
+    if not chosen:
+        cycles.compute_device_type = "NONE"
+        cycles.get_devices()
+        for d in cycles.devices:
+            d.use = True
+        print("blender-gpu-setup: no hardware GPU, using CPU rendering", file=sys.stderr)
+
+    bpy.ops.wm.save_userpref()
+  '';
+
+  # Wrapper: ensures Blender is running with the MCP add-on before starting
+  # the MCP bridge. On first run: installs the add-on, configures Cycles GPU
+  # preferences, then launches Blender headlessly to open port 9876.
+  blender-mcp-wrapper = pkgs.writeShellScript "blender-mcp-wrapper" ''
+    export DISPLAY=''${DISPLAY:-:99}
+    export BLENDER_MCP_DISABLE_TELEMETRY=1
+
+    BLENDER_VER=$(${pkgs.blender}/bin/blender --version 2>/dev/null | head -1 | grep -oP '\d+\.\d+')
+    ADDON_DIR="$HOME/.config/blender/$BLENDER_VER/scripts/addons"
+    mkdir -p "$ADDON_DIR"
+    ln -sf "${blender-mcp-addon}/blender_mcp.py" "$ADDON_DIR/blender_mcp.py"
+
+    STAMP="$HOME/.config/blender/$BLENDER_VER/.gpu-configured"
+    if [ ! -f "$STAMP" ]; then
+      echo "blender-mcp: first run — configuring GPU and add-on preferences" >&2
+      ${pkgs.blender}/bin/blender --background --python "${blender-gpu-setup}" 2>&1 | \
+        grep -E "^blender-gpu-setup:" >&2 || true
+      touch "$STAMP"
+    fi
+
+    if ! ${pkgs.netcat-gnu}/bin/netcat -z localhost 9876 2>/dev/null; then
+      ${pkgs.blender}/bin/blender --background \
+        --python-expr "
+import bpy
+bpy.ops.preferences.addon_enable(module='blender_mcp')
+import blender_mcp
+" &
+      for i in $(seq 1 60); do
+        ${pkgs.netcat-gnu}/bin/netcat -z localhost 9876 2>/dev/null && break
+        sleep 0.5
+      done
+      if ! ${pkgs.netcat-gnu}/bin/netcat -z localhost 9876 2>/dev/null; then
+        echo "blender-mcp: Blender failed to start MCP server on port 9876" >&2
+        exit 1
+      fi
+    fi
+    exec ${bin}/mcp-for-blender "$@"
+  '';
 in {
   options.devcell.modules.graphics = {
-    enable = lib.mkEnableOption "Draw.io + Inkscape + GIMP + their MCP servers";
+    enable = lib.mkEnableOption "Draw.io + Inkscape + GIMP + Blender + their MCP servers";
     drawio.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -116,13 +232,18 @@ in {
       default = true;
       description = "Include GIMP and its MCP server with the graphics tools";
     };
+    blender.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Include Blender and its MCP server with the graphics tools";
+    };
     meta = lib.mkOption {
       type = lib.types.attrs;
       readOnly = true;
       default = {
-        description = "Vector graphics (Inkscape), raster (GIMP), Draw.io headless; MCP for Inkscape + GIMP";
-        mcpServers = [ "inkscape-mcp" "gimp-mcp" ];
-        sizeMb = 900;
+        description = "Vector graphics (Inkscape), raster (GIMP), 3D (Blender), Draw.io headless; MCP for Inkscape + GIMP + Blender";
+        mcpServers = [ "inkscape-mcp" "gimp-mcp" "blender-mcp" ];
+        sizeMb = 1400;
       };
     };
   };
@@ -137,6 +258,10 @@ in {
     ++ lib.optionals (pkgs.stdenv.isLinux && cfg.gimp.enable) [
       gimp             # GNU Image Manipulation Program 3.2 — GTK/X11, Linux only (use: gimp)
       gimp-mcp         # GIMP MCP server — requires gimp, Linux only
+    ]
+    ++ lib.optionals (pkgs.stdenv.isLinux && cfg.blender.enable) [
+      blender          # 3D creation/animation suite — Linux only (use: blender)
+      blender-mcp      # Blender MCP server — requires blender, Linux only
     ]
     ++ lib.optionals (pkgs.stdenv.isLinux && cfg.drawio.enable) [
       drawio-headless  # Draw.io headless CLI — Electron, Linux only (use: drawio)
@@ -160,6 +285,15 @@ in {
           command = "${gimp-mcp-wrapper}";
           args = [];
           env = {};
+        };
+      })
+      (lib.mkIf (pkgs.stdenv.isLinux && cfg.blender.enable) {
+        "blender-mcp" = {
+          command = "${blender-mcp-wrapper}";
+          args = [];
+          env = {
+            BLENDER_MCP_DISABLE_TELEMETRY = "1";
+          };
         };
       })
     ];
