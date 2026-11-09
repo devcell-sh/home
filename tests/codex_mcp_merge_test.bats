@@ -22,9 +22,6 @@ setup() {
 backupBeforeMerge = false
 devcellManagedServers = ["google-maps"]
 
-[tui]
-alternate_screen = "never"
-
 [mcp_servers.google-maps]
 args = ["--stdio"]
 command = "/opt/devcell/bin/mcp-google-map"
@@ -73,7 +70,12 @@ teardown() {
   rm -rf "$TMPDIR_TEST"
 }
 
-@test "s6 merge applies managed TUI settings and preserves user preferences" {
+@test "s6 merge leaves TUI preferences user-owned even with stale staged settings" {
+  cat >> "$NIX_FILE" <<'EOF'
+
+[tui]
+alternate_screen = "never"
+EOF
   load_s6_merge
   merge_codex_mcp "$TARGET_FILE"
 
@@ -84,10 +86,18 @@ import tomllib
 with open(sys.argv[1], "rb") as f:
     config = tomllib.load(f)
 
-assert config["tui"]["alternate_screen"] == "never"
+assert config["tui"]["alternate_screen"] == "always"
 assert config["tui"]["animations"] is False
 assert config["model"] == "gpt-test"
 assert "user-owned" in config["mcp_servers"]
+PYEOF
+
+  printf 'model = "gpt-test"\n' > "$TARGET_FILE"
+  merge_codex_mcp "$TARGET_FILE"
+  python3 - "$TARGET_FILE" <<'PYEOF'
+import sys, tomllib
+config = tomllib.load(open(sys.argv[1], "rb"))
+assert "tui" not in config
 PYEOF
 }
 
@@ -102,7 +112,7 @@ with open(sys.argv[1], "rb") as f:
     config = tomllib.load(f)
 
 assert config["model"] == "gpt-test"
-assert config["tui"]["alternate_screen"] == "never"
+assert config["tui"]["alternate_screen"] == "always"
 assert config["tui"]["animations"] is False
 assert config["mcp_servers"]["user-owned"]["command"] == "/usr/bin/user-owned-mcp"
 
@@ -177,7 +187,7 @@ EOF
   python3 - "$TMPDIR_TEST/original.toml" "$TARGET_FILE" <<'PYEOF'
 import sys, tomllib
 original, merged = [tomllib.load(open(p, 'rb')) for p in sys.argv[1:]]
-for key in ('projects', 'plugins'):
+for key in ('projects', 'plugins', 'tui'):
     assert merged[key] == original[key]
 assert merged['model_providers']['custom'] == original['model_providers']['custom']
 assert 'managed' in merged['model_providers']
@@ -206,11 +216,12 @@ PYEOF
   cp "$TARGET_FILE" "$TMPDIR_TEST/cli/config.toml"
   (cd "$TMPDIR_TEST" && CODEX_HOME="$TMPDIR_TEST/cli" \
     "$CODEX_TEST_ENV/bin/codex" mcp list --json > "$TMPDIR_TEST/list.json")
-  python3 - "$CODEX_TEST_ENV/share/codex-test/claude.json" "$TARGET_FILE" "$TMPDIR_TEST/list.json" <<'PYEOF'
+  python3 - "$CODEX_TEST_ENV/share/codex-test/claude.json" "$TARGET_FILE" "$TMPDIR_TEST/list.json" "$NIX_FILE" <<'PYEOF'
 import sys, json, tomllib
 claude = json.load(open(sys.argv[1]))['mcpServers']
 codex = tomllib.load(open(sys.argv[2], 'rb'))['mcp_servers']
 listed = {s['name']: s for s in json.load(open(sys.argv[3]))}
+assert 'tui' not in tomllib.load(open(sys.argv[4], 'rb'))
 assert set(codex) == set(claude) | {'user-owned'}
 assert set(listed) == set(codex)
 assert codex['remote-test']['url'] == claude['remote-test']['url']

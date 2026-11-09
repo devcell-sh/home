@@ -27,6 +27,9 @@ OAuth login and credentials are separate from inventory and enablement.
   the variable, never its contents. Values are never executed as shell code.
 - Unrelated user tables, including nested project, plugin and provider settings,
   survive the merge. TOML formatting/comments may change.
+- TUI preferences, including `tui.alternate_screen`, belong to the user in
+  `~/.codex/config.toml`. They are neither generated nor overridden. Leaving a
+  preference unset preserves Codex's default behavior.
 
 ## Upgrade checks
 

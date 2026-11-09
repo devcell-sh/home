@@ -83,8 +83,6 @@ let
     backupBeforeMerge = mcpCfg.backupBeforeMerge;
     devcellManagedServers = builtins.attrNames mcpCfg.servers;
     mcp_servers = lib.mapAttrs toCodexServer allServers;
-    # Leave transcript scrollback and selection to the terminal/tmux.
-    tui.alternate_screen = "never";
   };
 
   hasServers = allServers != { };

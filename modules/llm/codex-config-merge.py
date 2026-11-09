@@ -79,8 +79,6 @@ def merge(nix, providers, existing):
         for name, server in nix.get("mcp_servers", {}).items()
     }
     merged["mcp_servers"] = {**cleaned, **managed}
-    if nix.get("tui"):
-        merged["tui"] = {**existing.get("tui", {}), **nix["tui"]}
     if providers.get("model_providers"):
         merged["model_providers"] = {
             **existing.get("model_providers", {}), **providers["model_providers"]
