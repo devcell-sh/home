@@ -12,6 +12,7 @@ HOME="${SESSION_HOME:-$HOME}"
 merge_codex_mcp() {
     target_file="$1"
     nix_file="/etc/codex/nix-mcp-servers.toml"
+    providers_file="/etc/codex/nix-providers.toml"
     [ -f "$nix_file" ] || return 0
     command -v python3 >/dev/null 2>&1 || return 1
     python3 -c "import tomllib; tomllib.load(open('$nix_file','rb'))" 2>/dev/null || return 1
@@ -39,97 +40,7 @@ print('true' if d.get('backupBeforeMerge', True) else 'false')
     fi
 
     temp_file=$(mktemp)
-    py_ok=true
-    python3 - "$nix_file" "$target_file" "$temp_file" 2>/dev/null << 'PYEOF' || py_ok=false
-import sys, tomllib, os
-
-nix_path, target_path, temp_path = sys.argv[1], sys.argv[2], sys.argv[3]
-
-def toml_val(v):
-    if isinstance(v, str):   return f'"{v}"'
-    if isinstance(v, bool):  return 'true' if v else 'false'
-    if isinstance(v, int):   return str(v)
-    if isinstance(v, float): return repr(v)
-    if isinstance(v, list):  return '[' + ', '.join(toml_val(x) for x in v) + ']'
-    raise ValueError(f"unsupported type: {type(v)}")
-
-def write_toml(data, out):
-    skip = {'mcp_servers', 'backupBeforeMerge', 'devcellManagedServers'}
-    for k, v in data.items():
-        if k not in skip and not isinstance(v, dict):
-            out.write(f'{k} = {toml_val(v)}\n')
-    if 'mcp_servers' in data:
-        for srv, sdata in data['mcp_servers'].items():
-            out.write(f'\n[mcp_servers.{srv}]\n')
-            for sk, sv in sdata.items():
-                if not isinstance(sv, dict):
-                    out.write(f'{sk} = {toml_val(sv)}\n')
-            for sk, sv in sdata.items():
-                if isinstance(sv, dict):
-                    out.write(f'\n[mcp_servers.{srv}.{sk}]\n')
-                    for ek, ev in sv.items():
-                        out.write(f'{ek} = {toml_val(ev)}\n')
-    for k, v in data.items():
-        if k not in skip and isinstance(v, dict):
-            out.write(f'\n[{k}]\n')
-            for sk, sv in v.items():
-                if not isinstance(sv, dict):
-                    out.write(f'{sk} = {toml_val(sv)}\n')
-
-with open(nix_path, 'rb') as f:
-    nix = tomllib.load(f)
-try:
-    with open(target_path, 'rb') as f:
-        existing = tomllib.load(f)
-except FileNotFoundError:
-    existing = {}
-
-merged = dict(existing)
-def is_devcell_managed(srv):
-    if not isinstance(srv, dict): return False
-    cmd = srv.get('command')
-    return isinstance(cmd, str) and cmd.startswith('/opt/devcell/')
-
-def resolve_env_value(value):
-    if not isinstance(value, str): return value, True
-    if value.startswith('${') and value.endswith('}') and len(value) > 3:
-        name = value[2:-1]
-        resolved = os.environ.get(name)
-        return resolved, bool(resolved)
-    return value, True
-
-def codex_ready_servers(servers):
-    ready, skipped = {}, []
-    for name, srv in servers.items():
-        if not isinstance(srv, dict):
-            ready[name] = srv
-            continue
-        srv = dict(srv)
-        env = srv.get('env')
-        if isinstance(env, dict):
-            resolved_env, missing = {}, []
-            for key, value in env.items():
-                resolved, ok = resolve_env_value(value)
-                if not ok: missing.append(key)
-                else: resolved_env[key] = resolved
-            if missing:
-                skipped.append((name, missing))
-                continue
-            srv['env'] = resolved_env
-        ready[name] = srv
-    return ready, skipped
-
-managed_names = set(nix.get('devcellManagedServers', []))
-cleaned = {k: v for k, v in existing.get('mcp_servers', {}).items()
-           if k not in managed_names and not is_devcell_managed(v)}
-nix_servers, skipped = codex_ready_servers(nix.get('mcp_servers', {}))
-merged['mcp_servers'] = {**cleaned, **nix_servers}
-
-with open(temp_path, 'w') as f:
-    write_toml(merged, f)
-PYEOF
-
-    if [ "$py_ok" = true ] && [ -s "$temp_file" ] && python3 -c "import tomllib; tomllib.load(open('$temp_file','rb'))" 2>/dev/null; then
+    if devcell-codex-config-merge "$nix_file" "$providers_file" "$target_file" "$temp_file" && [ -s "$temp_file" ] && python3 -c "import tomllib; tomllib.load(open('$temp_file','rb'))" 2>/dev/null; then
         mv "$temp_file" "$target_file"
     else
         rm -f "$temp_file"

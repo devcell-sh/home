@@ -1,7 +1,7 @@
 # mcp.nix — shared MCP server option definition.
 # Individual tool modules (claude.nix, opencode.nix, codex.nix, gemini.nix) each
 # build their own config derivation from config.devcell.managedMcp.servers,
-# filtering to `enabled or false` (opt-in — see `servers` option doc below).
+# retaining definitions and applying opt-in enablement at startup.
 {
   lib,
   config,
@@ -32,17 +32,13 @@ in {
       description = ''
         Canonical MCP server definitions. Each entry:
           { command, args?, env? }            # stdio (default)
-          { type = "http"; url; }             # http (Claude only)
-          { ...; enabled = true; }            # opt in: stage into Claude/OpenCode/Codex/Gemini
+          { type = "http"; url; }             # http (Claude and Codex)
+          { ...; enabled = true; }            # opt in: enable at startup
 
-        `enabled` defaults to false — a registered server is installed
-        (home.packages) but NOT injected into any agent config unless
-        `enabled = true` is set, either directly on the entry or via a
-        per-repo override merged in from .devcell.toml's [mcp]
-        enabled=[...] list (see the `devcell` CLI's GenerateFlakeNix, which
-        emits `devcell.managedMcp.servers."<name>".enabled = true;` lines —
-        these deep-merge with the module's own partial definition of the
-        same name via the standard attrsOf-anything module merge).
+        Registered servers are staged into client configs even when disabled.
+        `enabled` defaults to false; set it on the entry or select the name
+        through .devcell.toml's [mcp] enabled=[...] list. The latter is passed
+        as DEVCELL_MCP_ENABLED and applied by the startup services.
       '';
     };
     backupBeforeMerge = lib.mkOption {

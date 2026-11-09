@@ -88,7 +88,7 @@ in
     # Atlassian (Jira + Confluence + Rovo) — remote HTTP MCP server.
     # Upstream config repo: https://github.com/atlassian/atlassian-mcp-server
     # Auth: OAuth 2.1 (3LO) on first use — run /mcp in Claude session to authenticate.
-    # Claude-only: opencode/codex/gemini filter to stdio. For those clients, wrap
+    # Claude and Codex support HTTP; opencode/gemini filter to stdio. For those clients, wrap
     # the URL with `npx -y mcp-remote ...` in a separate stdio entry.
     devcell.managedMcp.servers."atlassian" = {
       type = "http";

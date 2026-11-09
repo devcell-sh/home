@@ -56,6 +56,11 @@ tasks:
     cmds:
       - bats tests/*_test.bats
 
+  test:codex:
+    desc: Build pinned Codex and verify MCP generation, merging and CLI compatibility
+    cmds:
+      - bats tests/codex_mcp_merge_test.bats
+
   test:e2e:
     desc: Run e2e tests (requires sudo, run inside container)
     preconditions:

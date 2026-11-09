@@ -10,22 +10,27 @@ let
   mcpCfg = config.devcell.managedMcp;
 
   toml = pkgs.formats.toml { };
+  mergePython = pkgs.python3.withPackages (ps: [ ps.tomli-w ]);
+  configMerger = pkgs.writeScriptBin "devcell-codex-config-merge" ''
+    #!${mergePython}/bin/python3
+    ${builtins.readFile ./codex-config-merge.py}
+  '';
 
   # ── Codex CLI from npm ──────────────────────────────────────────────
   # Fetches the platform-specific prebuilt binary directly from the npm
   # registry. The npm package ships a Node.js shim that spawns a static
   # musl-linked Rust binary — we skip the shim and install the binary.
-  codexVersion = "0.157.0";
+  codexVersion = "0.167.0";
   codexPlatforms = {
     "aarch64-linux" = {
       triple = "aarch64-unknown-linux-musl";
       url = "https://registry.npmjs.org/@openai/codex/-/codex-${codexVersion}-linux-arm64.tgz";
-      hash = "sha256-6U02hJVBuw4Hqsu/PtyZr366Iv+BPmh46r0+TDKDCes=";
+      hash = "sha256-4k17bwr1aVo2wEaSw6eWcr2t68rHxEAFJZyzytNqxA4=";
     };
     "x86_64-linux" = {
       triple = "x86_64-unknown-linux-musl";
       url = "https://registry.npmjs.org/@openai/codex/-/codex-${codexVersion}-linux-x64.tgz";
-      hash = "sha256-jMYrGjsNf9LDInwrgqjEQr7f9Sp7MLaYUGhub1Epq9M=";
+      hash = "sha256-Lcmqhxq7UTw1OdINAl9wH68ZdMRu6Qa9o6Hh9QJtRDQ=";
     };
   };
   codexPlatform = codexPlatforms.${pkgs.stdenv.hostPlatform.system} or null;
@@ -52,28 +57,37 @@ let
     dontFixup = true;
   } else null;
 
-  # All stdio servers — Codex doesn't support HTTP transport.
-  # Fragments filter at runtime using DEVCELL_MCP_ENABLED env var.
-  allStdioServers = lib.filterAttrs (
-    _: s: ((s.type or "stdio") == "stdio") && ((s ? command) || (s ? url))
+  # Keep the same inventory as Claude. Codex supports stdio and HTTP;
+  # enablement is applied at startup using DEVCELL_MCP_ENABLED.
+  allServers = lib.filterAttrs (
+    _: s: (s ? command) || (s ? url)
   ) mcpCfg.servers;
 
   toCodexServer =
     _: s:
-    ({
+    { enabled = s.enabled or false; }
+    // (if (s.type or "stdio") == "http" then {
+      url = s.url;
+    } // lib.optionalAttrs (s ? headers) { http_headers = s.headers; }
+      // lib.optionalAttrs (s ? bearer_token_env_var) {
+        inherit (s) bearer_token_env_var;
+      }
+      // lib.optionalAttrs (s ? env_http_headers) { inherit (s) env_http_headers; }
+    else {
       command = s.command;
       args = s.args or [ ];
-      enabled = s.enabled or false;
-    }
-    // lib.optionalAttrs ((s.env or { }) != { }) { env = s.env; });
+    } // lib.optionalAttrs ((s.env or { }) != { }) { env = s.env; }
+      // lib.optionalAttrs (s ? env_vars) { inherit (s) env_vars; });
 
   codexConfig = toml.generate "codex-nix-mcp-servers.toml" {
     backupBeforeMerge = mcpCfg.backupBeforeMerge;
     devcellManagedServers = builtins.attrNames mcpCfg.servers;
-    mcp_servers = lib.mapAttrs toCodexServer allStdioServers;
+    mcp_servers = lib.mapAttrs toCodexServer allServers;
+    # Leave transcript scrollback and selection to the terminal/tmux.
+    tui.alternate_screen = "never";
   };
 
-  hasServers = allStdioServers != { };
+  hasServers = allServers != { };
 
   # ── model_providers: OpenAI-compatible endpoints, merged into
   # ~/.codex/config.toml as [model_providers.<id>]. Each entry:
@@ -164,7 +178,7 @@ in
   };
 
   config = {
-    home.packages = lib.optional (codex != null) codex;
+    home.packages = [ configMerger ] ++ lib.optional (codex != null) codex;
 
     # ── Default model_providers ─────────────────────────────────────────
     # Hetzner Inference API (https://inference.hetzner.com) — free/experimental
