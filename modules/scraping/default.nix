@@ -31,9 +31,9 @@ let
   mesaX86 = if isAarch64 then pkgsX86.mesa else null;
 
   # Chromium browser from playwright-driver -- chromium only, no firefox/webkit/ffmpeg.
-  # patchright-core reads browsers.json for expected revision (e.g. 1208) but nixpkgs
+  # patchright-core reads browsers.json for expected revision (e.g. 1234) but nixpkgs
   # playwright-driver may ship a different revision (e.g. 1194). Bridge with symlinks.
-  patchrightChromiumRevision = "1223";
+  patchrightChromiumRevision = "1234";
   baseBrowsers = pkgs.playwright-driver.browsers.override {
     withFirefox = false;
     withWebkit = false;
@@ -58,13 +58,13 @@ let
   # buildNpmPackage derivation for patchright MCP server
   patchrightMcp = pkgs.buildNpmPackage {
     pname = "mcp-server-patchright";
-    version = "0.0.68-pr1.60.2";
+    version = "0.0.68-pr1.63.0";
     src = pkgs.runCommandLocal "patchright-mcp-src" {} ''
       mkdir -p $out
       cp ${./patchright-mcp-package.json} $out/package.json
       cp ${./patchright-mcp-package-lock.json} $out/package-lock.json
     '';
-    npmDepsHash = "sha256-mteUzPzn90hUwmKXcOsYH/n1nlvpPU3Hgc0zsAlUYe0=";
+    npmDepsHash = "sha256-8FMak6SAyFCPHPrHZCDHbXTZaQxb8Su9XotMDBdTQDA=";
     npmPackFlags = [ "--ignore-scripts" ];
     npmFlags = [ "--ignore-scripts" ];
     dontNpmBuild = true;
@@ -220,7 +220,7 @@ SHIMEOF
         # getHighEntropyValues().bitness on real Chrome (which always sends "64").
         # Wrap the call site so the result includes bitness:"64" plus any
         # user-supplied userAgentMetadata overrides from contextOptions.
-        ${pkgs.gnused}/bin/sed -i 's#userAgentMetadata: calculateUserAgentMetadata(options2)#userAgentMetadata: Object.assign({ bitness: "64" }, calculateUserAgentMetadata(options2), options2.userAgentMetadata || {})#' "$CORE"
+        ${pkgs.gnused}/bin/sed -i 's#userAgentMetadata: calculateUserAgentMetadata(options)#userAgentMetadata: Object.assign({ bitness: "64" }, calculateUserAgentMetadata(options), options.userAgentMetadata || {})#' "$CORE"
         if ${pkgs.gnugrep}/bin/grep -q 'bitness: "64"' "$CORE"; then
           echo "Patched coreBundle.js: _updateUserAgent injects bitness=64 (CELL-150)"
         else
@@ -228,21 +228,11 @@ SHIMEOF
           exit 1
         fi
 
-        # CELL-69: real Chrome's Sec-CH-UA includes "Google Chrome" brand
-        # alongside "Chromium" and a GREASE entry; patchright/Chromium ships
-        # only Chromium + Not:A-Brand. Google's identifier-step classifier
-        # rejects sign-in when "Google Chrome" is absent ("This browser or
-        # app may not be secure"). Extend the CELL-150 Object.assign to also
-        # inject brands + fullVersionList with all three brand entries.
-        # Chrome major hardcoded to 141 (matches bundled chromium at time of
-        # patch); grep guard fails the build if the assign signature drifts.
-        ${pkgs.gnused}/bin/sed -i 's#Object.assign({ bitness: "64" }, calculateUserAgentMetadata(options2)#Object.assign({ bitness: "64", brands: [{brand:"Google Chrome",version:"141"},{brand:"Chromium",version:"141"},{brand:"Not?A_Brand",version:"8"}], fullVersionList: [{brand:"Google Chrome",version:"141.0.7390.108"},{brand:"Chromium",version:"141.0.7390.108"},{brand:"Not?A_Brand",version:"8.0.0.0"}] }, calculateUserAgentMetadata(options2)#' "$CORE"
-        if ${pkgs.gnugrep}/bin/grep -q 'brand:"Google Chrome"' "$CORE"; then
-          echo "Patched coreBundle.js: _updateUserAgent injects Google Chrome brand (CELL-69)"
-        else
-          echo "ERROR: CELL-69 brand patch did NOT apply — CELL-150 patch signature may have changed"
-          exit 1
-        fi
+        # CELL-69: moved to runtime. The patchright-mcp-cell wrapper now
+        # injects "Google Chrome" brand via jq at launch, using the detected
+        # Chromium version instead of a hardcoded one. The CELL-150
+        # Object.assign passes options.userAgentMetadata (from the wrapper's
+        # config) as the last arg, so runtime brands always win.
 
         # CELL-329: patchright's Chromium patches redirect page.evaluate()
         # to an isolated V8 world. Init-script JS overrides (e.g.
@@ -254,7 +244,7 @@ SHIMEOF
         # level, which applies to ALL execution contexts (main, isolated,
         # workers). The legacy platform string is derived from
         # userAgentMetadata.platform + .architecture.
-        ${pkgs.gnused}/bin/sed -i 's#acceptLanguage: options2.locale,#acceptLanguage: options2.locale, platform: (function(_m){return _m.platform==="macOS"?"MacIntel":_m.platform==="Windows"?"Win32":_m.platform==="Linux"?(_m.architecture==="arm"?"Linux aarch64":"Linux x86_64"):void 0})(Object.assign({},calculateUserAgentMetadata(options2),options2.userAgentMetadata||{})),#' "$CORE"
+        ${pkgs.gnused}/bin/sed -i 's#acceptLanguage: options.locale,#acceptLanguage: options.locale, platform: (function(_m){return _m.platform==="macOS"?"MacIntel":_m.platform==="Windows"?"Win32":_m.platform==="Linux"?(_m.architecture==="arm"?"Linux aarch64":"Linux x86_64"):void 0})(Object.assign({},calculateUserAgentMetadata(options),options.userAgentMetadata||{})),#' "$CORE"
         if ${pkgs.gnugrep}/bin/grep -q 'platform: (function(_m)' "$CORE"; then
           echo "Patched coreBundle.js: _updateUserAgent injects navigator.platform CDP override (CELL-329)"
         else
@@ -334,6 +324,8 @@ SHIMEOF
         "--disable-features=AudioServiceSandbox"
         "--autoplay-policy=no-user-gesture-required"
         "--disable-blink-features=AutomationControlled"
+        "--enable-unsafe-webgpu"
+        "--enable-features=Vulkan"
       ] ++ extensionArgs;
       # Block ServiceWorkers -- they run in a separate scope unreachable by init-script.
       # Forces detection scripts to fall back to SharedWorker, which we CAN intercept.
@@ -1132,7 +1124,7 @@ SHIMEOF
       // Real laptop: discharging, ~70% level, ~2h remaining.
       // Use fixed-but-plausible values so repeated calls return the same object.
       (function() {
-        var _level = 0.67 + (Math.floor(Date.now() / 86400000) % 20) / 100;
+        var _level = Math.round((0.67 + (Math.floor(Date.now() / 86400000) % 20) / 100) * 100) / 100;
         var _dtime = 6300 + (Math.floor(Date.now() / 3600000) % 60) * 60;
         var _battery = {
           charging: false,
@@ -1648,6 +1640,11 @@ SHIMEOF
       if [ -n "$_CHROME_BIN" ] && [ -x "$_CHROME_BIN" ]; then
         _CHROME_FULL_VER=$("$_CHROME_BIN" --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+\.\d+' || echo "141.0.0.0")
       fi
+      # Re-detect from the override binary when set (the actual executable may
+      # be a different version than the bundled patchright-browsers chrome).
+      if [ -n "$_EXEC_PATH_OVERRIDE" ] && [ -x "$_EXEC_PATH_OVERRIDE" ]; then
+        _CHROME_FULL_VER=$("$_EXEC_PATH_OVERRIDE" --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+\.\d+' || echo "$_CHROME_FULL_VER")
+      fi
       _CHROME_MAJOR="''${_CHROME_FULL_VER%%.*}"
       # Build UA string from arch + platform + detected Chrome version.
       case "$_STEALTH_PLATFORM" in
@@ -1682,10 +1679,12 @@ SHIMEOF
               "model": "",
               "mobile": false,
               "brands": [
+                {"brand": "Google Chrome", "version": $cmajor},
                 {"brand": "Chromium", "version": $cmajor},
                 {"brand": "Not?A_Brand", "version": "8"}
               ],
               "fullVersionList": [
+                {"brand": "Google Chrome", "version": $cfull},
                 {"brand": "Chromium", "version": $cfull},
                 {"brand": "Not?A_Brand", "version": "8.0.0.0"}
               ]
@@ -1745,10 +1744,12 @@ SHIMEOF
                  "model": "",
                  "mobile": false,
                  "brands": (if ($brands | length) > 0 then $brands else [
+                   {"brand": "Google Chrome", "version": $cmajor},
                    {"brand": "Chromium", "version": $cmajor},
                    {"brand": "Not?A_Brand", "version": "8"}
                  ] end),
                  "fullVersionList": (if ($brands | length) > 0 then $brands else [
+                   {"brand": "Google Chrome", "version": ($ver // $cfull)},
                    {"brand": "Chromium", "version": ($ver // $cfull)},
                    {"brand": "Not?A_Brand", "version": "8.0.0.0"}
                  ] end)
@@ -1811,6 +1812,13 @@ SHIMEOF
             printf '%s=%s\n' "$_key" "$_val"
           fi
         done < "$_ENV_FILE" >> "$SECRETS_FILE"
+      fi
+
+      # Start PulseAudio with null sink so speechSynthesis reports voices
+      if ! ${pkgs.pulseaudio}/bin/pulseaudio --check 2>/dev/null; then
+        ${pkgs.pulseaudio}/bin/pulseaudio --start --exit-idle-time=-1 --disable-shm=true \
+          --load="module-null-sink sink_name=NullSink" \
+          --load="module-native-protocol-unix" 2>/dev/null || true
       fi
 
       # Shared-browser mode: if the interactive chromium wrapper is already
@@ -1960,6 +1968,14 @@ in {
       patchrightMcpCell
       chromiumWrapper
       pkgs.android-tools  # adb: CDP forwarding to Android Chrome for playwright-android MCP
+      pkgs.corefonts
+      pkgs.noto-fonts-cjk-sans
+      pkgs.noto-fonts-color-emoji
+      pkgs.dejavu_fonts
+      pkgs.liberation_ttf
+      pkgs.roboto
+      pkgs.source-sans
+      pkgs.inter
     ] ++ lib.optionals isAarch64 [ chromiumX86Wrapper ];
 
     home.sessionVariables = {
