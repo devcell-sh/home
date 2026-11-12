@@ -49,13 +49,7 @@ EOF
   export GOOGLE_MAPS_API_KEY="test-google-maps-key"
   unset DEVCELL_MCP_ENABLED
 
-  FRAGMENT="$REPO_ROOT/modules/fragments/30-codex.sh"
-  merge_function=$(sed -n '/^merge_codex_mcp()/,/^}/p' "$FRAGMENT")
-  merge_function=$(printf '%s\n' "$merge_function" |
-      sed \
-          -e "s#local nix_file=\"/etc/codex/nix-mcp-servers.toml\"#local nix_file=\"$NIX_FILE\"#" \
-          -e "s#local providers_file=\"/etc/codex/nix-providers.toml\"#local providers_file=\"$PROVIDERS_FILE\"#")
-  eval "$merge_function"
+  load_s6_merge
 }
 
 load_s6_merge() {

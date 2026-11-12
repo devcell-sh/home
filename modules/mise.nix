@@ -53,7 +53,7 @@ in {
     };
 
     # .tool-versions is written to /etc/devcell/ (not home.file) to avoid
-    # nix creating a dangling symlink at $HOME. The entrypoint fragment
+    # nix creating a dangling symlink at $HOME. The s6 mise service
     # copies it to $HOME at runtime; build-time mise install reads it
     # from /opt/devcell/ via the activation-generated copy.
     home.activation.writeToolVersions = lib.mkIf (cfg.tools != {}) (

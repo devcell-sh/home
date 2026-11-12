@@ -173,7 +173,7 @@ let
   ];
 
   # ── Fluxbox init (session settings) ───────────────────────────────────────
-  # entrypoint 50-gui.sh patches workspaceNames at runtime from $APP_NAME.
+  # s6 gui-config patches workspaceNames at runtime from $APP_NAME.
   init = ''
     session.appsFile:	/opt/devcell/.fluxbox/apps
     session.menuFile:	/opt/devcell/.fluxbox/menu

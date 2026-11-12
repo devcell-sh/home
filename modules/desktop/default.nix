@@ -92,7 +92,7 @@ in
   # NIX_LD_LIBRARY_PATH points at /opt/devcell/.nix-ld-libs — a merged directory
   # with symlinks to every .so* from the profile closure (glibc excluded).
   # Set by OCI Env (pure) or Dockerfile ENV (impure), re-exported by
-  # 06-nix-ldpath.sh (entrypoint) and zsh initContent (docker exec).
+  # env-setup (s6 oneshot) and zsh initContent (docker exec).
   # Only consulted by nix-ld shim — nix-built tools use RPATH untouched.
   #
   # The activation script (generateNixLdPath) scans the full profile closure at
@@ -128,7 +128,7 @@ in
   '';
 
   # NIX_LD_LIBRARY_PATH for interactive shells (docker exec) that bypass the
-  # entrypoint. Points at the merged .nix-ld-libs/ dir — no more ARG_MAX risk.
+  # s6 boot. Points at the merged .nix-ld-libs/ dir — no more ARG_MAX risk.
   programs.zsh.initContent = lib.mkAfter ''
     if [ -d "/opt/devcell/.nix-ld-libs" ] && [ -z "''${_DEVCELL_NIX_LD_LIBPATH_SET:-}" ]; then
       export NIX_LD_LIBRARY_PATH="/opt/devcell/.nix-ld-libs''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
@@ -144,9 +144,9 @@ in
     pulseaudio-module-xrdp # RDP audio redirection — routes PulseAudio → xrdp rdpsnd channel
     (lib.lowPrio sox) # audio Swiss Army knife; lowPrio avoids /bin/play collision with gotools
 
-    # VNC/RDP server stack — used by entrypoint.sh when DEVCELL_GUI_ENABLED=true
+    # VNC/RDP server stack — s6 longruns start when DEVCELL_GUI_ENABLED=true
     x11vnc # VNC server for X11
-    xrdp   # RDP server — gateway to VNC session (entrypoint starts on port 3389)
+    xrdp   # RDP server — gateway to VNC session (s6 starts on port 3389)
     xorg.xorgserver # X.Org server; provides Xvfb virtual framebuffer
 
     # X11 display utilities
@@ -159,7 +159,7 @@ in
     feh
     librsvg # rsvg-convert at startup: SVG wallpaper template → PNG with cell ID baked in
 
-    # Clipboard utilities — used by entrypoint.sh clipboard sync daemon
+    # Clipboard utilities
     xclip # read/write X11 selections; used in PRIMARY↔CLIPBOARD sync loop
 
     # Screenshot capture — used by tests to verify desktop renders
@@ -335,7 +335,7 @@ in
   # ── Fluxbox configuration (when windowManager = "fluxbox") ────────────────
   # Declared via the home-manager fluxbox module — generates ~/.fluxbox/{init,menu,...}.
   # homeDirectory is /opt/devcell so ~/.fluxbox is at /opt/devcell/.fluxbox (stable).
-  # entrypoint.sh launches fluxbox with: fluxbox -rc /opt/devcell/.fluxbox/init
+  # s6 window-manager launches fluxbox with: fluxbox -rc /opt/devcell/.fluxbox/init
 
   xsession.windowManager.fluxbox = lib.mkIf (wm == "fluxbox") {
     enable = true;

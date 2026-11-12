@@ -17,9 +17,11 @@ log() { :; }
 notify() { :; }
 export -f log notify
 
-source_fragment() {
-  local name="$1"
-  source "$REPO_ROOT/modules/fragments/$name"
+source_s6_functions() {
+  local script="$1"
+  local full="$REPO_ROOT/modules/s6/$script"
+  [ -f "$full" ] || { echo "source_s6_functions: $full not found" >&2; return 1; }
+  eval "$(sed -n '/^[a-zA-Z_][a-zA-Z_0-9]*()/,/^}/p' "$full")"
 }
 
 extract_function() {

@@ -4,7 +4,7 @@
 # config.devcell.s6.services (each module adds its own services there),
 # compiles them at build time via s6-rc-compile, and installs both the
 # source tree (for up.sh scripts) and the compiled database to
-# /etc/s6-rc/ where the entrypoint's s6-rc activation reads them.
+# /etc/s6-rc/ where s6-rc activation reads them.
 #
 # Gated on pkgs.stdenv.isLinux so macOS builds (which import base.nix too)
 # skip this module entirely.

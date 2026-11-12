@@ -4,7 +4,7 @@ load helper_test
 
 setup() {
   TMPDIR_TEST="$(mktemp -d)"
-  source "$REPO_ROOT/modules/fragments/mcp-toggle.sh"
+  source_s6_functions "mcp-toggle/up"
 }
 
 teardown() {

@@ -274,7 +274,7 @@ SHIMEOF
 
   # Static LD_LIBRARY_PATH fallback for the patchright-mcp-cell wrapper.
   # This wrapper is a nix derivation baked at eval time -- can't source files at runtime.
-  # All other contexts (entrypoint services, interactive shells) use the merged
+  # All other contexts (s6 services, interactive shells) use the merged
   # /opt/devcell/.nix-ld-libs/ directory via NIX_LD_LIBRARY_PATH.
   runtimeLibs = with pkgs; [
     glib

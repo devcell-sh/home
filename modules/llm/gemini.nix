@@ -1,4 +1,4 @@
-# gemini.nix — Gemini CLI MCP server staging and entrypoint merge logic.
+# gemini.nix — Gemini CLI MCP server staging and s6 merge logic.
 # Mirrors codex.nix; emits Claude-shape JSON instead of TOML because Gemini's
 # ~/.gemini/settings.json holds `mcpServers` at top level (same shape as
 # Claude's ~/.claude.json).
@@ -44,7 +44,7 @@ in {
       default = geminiConfig;
       internal = true;
       readOnly = true;
-      description = "Nix-store path of the generated Gemini MCP servers JSON (empty mcpServers when no servers enabled, so the entrypoint cleanup still removes stale /opt/devcell/ entries).";
+      description = "Nix-store path of the generated Gemini MCP servers JSON (empty mcpServers when no servers enabled, so the s6 config service still removes stale /opt/devcell/ entries).";
     };
   };
 
@@ -52,7 +52,7 @@ in {
     home.packages = [pkgsEdge.gemini-cli];
 
     # Always stage the MCP servers file (even when empty) so the
-    # entrypoint cleanup removes stale /opt/devcell/ servers on stack switch.
+    # s6 config service removes stale /opt/devcell/ servers on stack switch.
     home.activation.setupManagedGemini =
       lib.hm.dag.entryAfter ["writeBoundary"] ''
         # /run/wrappers/bin: NixOS keeps the sudo setuid wrapper there only.

@@ -225,7 +225,7 @@ in {
     hexedit # interactive TUI hex editor (use: hexedit file.bin)
     gnutar # GNU tar — POSIX archiver (use: tar). Was on Debian base, lost on slim.
     wget # HTTP downloader
-    rsync # fast file sync (used by entrypoint fragment staging)
+    rsync # fast file sync (used by s6 homedir service)
     s6 # s6 process supervision (use: s6-svscan, s6-supervise, s6-notifyoncheck)
     s6-rc # s6 service manager (use: s6-rc, s6-rc-init, s6-rc-compile)
     execline # execline scripting language (s6-rc parses oneshot "up" files as execline)

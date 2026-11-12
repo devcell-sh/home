@@ -52,6 +52,8 @@ export MISE_NODE_DEFAULT_PACKAGES_FILE="$(readlink -f "$DEVCELL_HOME/.default-np
 export NIX_CONF_DIR="$DEVCELL_HOME/.config/nix"
 export STARSHIP_CONFIG="$DEVCELL_HOME/.config/starship.toml"
 export FONTCONFIG_PATH="$DEVCELL_HOME/.config/fontconfig"
+export CHROMIUM_PROFILE_PATH="$HOME/.chrome/\${APP_NAME:-cell}"
+export PLAYWRIGHT_MCP_USER_DATA_DIR="$HOME/.chrome/\${APP_NAME:-cell}"
 export HISTFILE="$HOME/.zsh_history"
 export PATH="$HOME/go/bin:$HOME/.local/state/nix/profiles/profile/bin:$HOME/.local/state/nix/profiles/project/bin:$_nix_profile_bin:$HOME/.local/share/mise/shims\${PATH:+:}\${PATH}"
 RCEOF

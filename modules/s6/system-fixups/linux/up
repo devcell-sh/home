@@ -1,26 +1,76 @@
 #!/bin/sh
 set -e
 
-# system-fixups (Linux): clean stale nix-store symlinks from persistent $HOME.
-# $HOME is a bind mount that survives image rebuilds. Home-manager symlinks
-# from previous builds dangle after nix GC removes old store paths.
+# system-fixups (Linux): privileged boot-time fixes that must run as root.
+# Covers /tmp permissions, setuid sudo wrapper, nix state dirs, and stale
+# nix-store symlink cleanup from persistent $HOME.
 
 SESSION_HOME="${SESSION_HOME:-/home/${HOST_USER:-devcell}}"
 
-[ -d "$SESSION_HOME" ] || exit 0
-
 devcell-event "activating"
 
-find "$SESSION_HOME" -maxdepth 4 -type l \
-    -not -path "*/tmp/*" \
-    -not -path "$SESSION_HOME/.config/devcell/*" \
-    2>/dev/null | while IFS= read -r _link; do
-    _target=$(readlink "$_link" 2>/dev/null)
-    case "$_target" in /nix/store/*)
-        if [ ! -e "$_link" ]; then
-            rm -f "$_link"
-        fi
-    ;; esac
-done
+# ── /tmp must be 1777 (sticky world-writable) ───────────────────────────
+# n2c bakes /tmp at 0555; Xvfb needs /tmp/.X99-lock, and many tools need
+# a writable /tmp even without GUI.
+chmod 1777 /tmp 2>/dev/null || true
+
+# ── Setuid sudo wrapper (CELL-358) ──────────────────────────────────────
+# Nix store paths are 0555 and /nix is a shared volume, so the store can
+# never hold setuid. Copy sudo to a container-local dir and set setuid.
+_sudo_store=$(readlink -f "$(command -v sudo 2>/dev/null)" 2>/dev/null)
+if [ -n "$_sudo_store" ] && [ -e "$_sudo_store" ]; then
+    if install -D -m 4755 -o root -g root "$_sudo_store" /run/wrappers/bin/sudo 2>/dev/null; then
+        # Pin the closure so GC doesn't rip sudoers.so out from under the copy.
+        _sudo_pkg="${_sudo_store%/bin/sudo}"
+        _sudo_hash=$(basename "$_sudo_pkg" | cut -d- -f1)
+        mkdir -p /nix/var/nix/gcroots/devcell 2>/dev/null
+        ln -sfT "$_sudo_pkg" "/nix/var/nix/gcroots/devcell/sudo-wrapper-${_sudo_hash}" 2>/dev/null
+
+        for _p in /bin/sudo /usr/bin/sudo /sbin/sudo; do
+            ln -sfT /run/wrappers/bin/sudo "$_p" 2>/dev/null || true
+        done
+    fi
+fi
+
+# PAM stub (thin images may lack /etc/pam.d entirely).
+if [ ! -f /etc/pam.d/sudo ]; then
+    mkdir -p /etc/pam.d
+    printf 'auth     sufficient pam_permit.so\naccount  sufficient pam_permit.so\nsession  sufficient pam_permit.so\npassword sufficient pam_permit.so\n' > /etc/pam.d/sudo
+    chmod 0644 /etc/pam.d/sudo
+fi
+
+# ── /nix/var/nix state dirs ─────────────────────────────────────────────
+# Needed by every nix CLI invocation, not just daemon mode.
+mkdir -p /nix/var/nix/profiles/per-user \
+         /nix/var/nix/gcroots/per-user \
+         /nix/var/nix/gcroots/auto \
+         /nix/var/nix/gcroots/devcell \
+         /nix/var/nix/gcroots/tmp \
+         /nix/var/nix/daemon-socket \
+         /nix/var/nix/temproots \
+         /nix/var/nix/userpool 2>/dev/null
+chmod 1777 \
+    /nix/var/nix/profiles/per-user \
+    /nix/var/nix/gcroots/per-user \
+    /nix/var/nix/temproots \
+    /nix/var/nix/userpool 2>/dev/null || true
+chmod 0755 /nix/var/nix/daemon-socket 2>/dev/null || true
+
+# ── Stale symlink cleanup ───────────────────────────────────────────────
+# $HOME is a bind mount that survives image rebuilds. Home-manager symlinks
+# from previous builds dangle after nix GC removes old store paths.
+if [ -d "$SESSION_HOME" ]; then
+    find "$SESSION_HOME" -maxdepth 4 -type l \
+        -not -path "*/tmp/*" \
+        -not -path "$SESSION_HOME/.config/devcell/*" \
+        2>/dev/null | while IFS= read -r _link; do
+        _target=$(readlink "$_link" 2>/dev/null)
+        case "$_target" in /nix/store/*)
+            if [ ! -e "$_link" ]; then
+                rm -f "$_link"
+            fi
+        ;; esac
+    done
+fi
 
 devcell-event "up"

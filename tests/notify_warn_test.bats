@@ -6,7 +6,14 @@ setup() {
   TMPDIR_TEST="$(mktemp -d)"
   export DEVCELL_BOOT_DIR="$TMPDIR_TEST/boot"
   mkdir -p "$DEVCELL_BOOT_DIR"
-  source_fragment 00-notify.sh
+  notify() {
+    [ -n "$DEVCELL_BOOT_DIR" ] && [ -d "$DEVCELL_BOOT_DIR" ] || return 0
+    if [ $# -ge 2 ]; then
+      printf '%s\n' "$2" > "$DEVCELL_BOOT_DIR/$1" 2>/dev/null || true
+    else
+      touch "$DEVCELL_BOOT_DIR/$1" 2>/dev/null || true
+    fi
+  }
 }
 
 teardown() {

@@ -167,6 +167,24 @@ merge_claude_mcp "$HOME/.claude.json"
 merge_claude_mcp_json "$HOME/.mcp.json"
 
 # Linear MCP: inject Bearer token auth when LINEAR_API_KEY is set
+seed_claude_trust() {
+    local claude_json="$1" project_id="$2"
+    [ -f "$claude_json" ] || return 0
+    jq empty "$claude_json" 2>/dev/null || return 0
+    if jq -e --arg pid "$project_id" '.projects[$pid].hasTrustDialogAccepted == true' "$claude_json" >/dev/null 2>&1; then
+        return 0
+    fi
+    local tmp; tmp=$(mktemp)
+    if jq --arg pid "$project_id" '.projects[$pid] = ((.projects[$pid] // {}) + {hasTrustDialogAccepted: true})' \
+        "$claude_json" > "$tmp" 2>/dev/null && [ -s "$tmp" ] && jq empty "$tmp" 2>/dev/null; then
+        mv "$tmp" "$claude_json"
+    else
+        rm -f "$tmp"
+    fi
+}
+
+seed_claude_trust "$HOME/.claude.json" "/${HOSTNAME#cell-}"
+
 if [ -n "${LINEAR_API_KEY:-}" ] && [ -f "$HOME/.claude.json" ]; then
     _tmp=$(mktemp)
     # shellcheck disable=SC2015

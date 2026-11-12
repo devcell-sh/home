@@ -10,12 +10,14 @@ setup() {
   export HOSTNAME="cell-test-project"
   mkdir -p "$HOME/.claude" "$DEVCELL_HOME"
 
-  source "$REPO_ROOT/modules/fragments/mcp-toggle.sh"
+  source_s6_functions "mcp-toggle/up"
 
-  FRAGMENT="$REPO_ROOT/modules/fragments/30-claude.sh"
-  eval "$(sed -n '/^_mcp_enabled_json()/,/^}/p' "$FRAGMENT")"
-  eval "$(sed -n '/^merge_claude_mcp()/,/^}/p' "$FRAGMENT")"
-  eval "$(sed -n '/^sync_claude_mcp_state()/,/^}/p' "$FRAGMENT")"
+  S6_CLAUDE="$REPO_ROOT/modules/s6/claude-config/up"
+  eval "$(sed -n '/^merge_claude_mcp()/,/^}/p' "$S6_CLAUDE")"
+
+  S6_TOGGLE="$REPO_ROOT/modules/s6/mcp-toggle/up"
+  eval "$(sed -n '/^_mcp_enabled_json()/,/^}/p' "$S6_TOGGLE")"
+  eval "$(sed -n '/^sync_claude_mcp()/,/^}/p' "$S6_TOGGLE")"
 
   mkdir -p /tmp/test-claude-code
   cat > /tmp/test-claude-code/nix-mcp-servers.json <<'EOF'
@@ -52,7 +54,7 @@ teardown() {
   rm -f "$HOME/.claude.json"
   unset DEVCELL_MCP_ENABLED
   merge_claude_mcp "$HOME/.claude.json"
-  sync_claude_mcp_state "$HOME/.claude.json"
+  sync_claude_mcp "$HOME/.claude.json"
   assert_equal '["gimp"]' "$(jq -c '.projects["/test-project"].disabledMcpServers' "$HOME/.claude.json")"
   assert_equal '["gimp","linear","playwright"]' "$(jq -c '.mcpServers | keys | sort' "$HOME/.claude.json")"
 }
@@ -61,10 +63,10 @@ teardown() {
   rm -f "$HOME/.claude.json"
   unset DEVCELL_MCP_ENABLED
   merge_claude_mcp "$HOME/.claude.json"
-  sync_claude_mcp_state "$HOME/.claude.json"
+  sync_claude_mcp "$HOME/.claude.json"
 
   export DEVCELL_MCP_ENABLED="gimp"
-  sync_claude_mcp_state "$HOME/.claude.json"
+  sync_claude_mcp "$HOME/.claude.json"
   assert_equal '[]' "$(jq -c '.projects["/test-project"].disabledMcpServers' "$HOME/.claude.json")"
   unset DEVCELL_MCP_ENABLED
 }
@@ -75,10 +77,10 @@ teardown() {
   merge_claude_mcp "$HOME/.claude.json"
 
   export DEVCELL_MCP_ENABLED="gimp"
-  sync_claude_mcp_state "$HOME/.claude.json"
+  sync_claude_mcp "$HOME/.claude.json"
   unset DEVCELL_MCP_ENABLED
 
-  sync_claude_mcp_state "$HOME/.claude.json"
+  sync_claude_mcp "$HOME/.claude.json"
   assert_equal '["gimp"]' "$(jq -c '.projects["/test-project"].disabledMcpServers' "$HOME/.claude.json")"
 }
 
@@ -86,7 +88,7 @@ teardown() {
   rm -f "$HOME/.claude.json"
   unset DEVCELL_MCP_ENABLED
   merge_claude_mcp "$HOME/.claude.json"
-  sync_claude_mcp_state "$HOME/.claude.json"
+  sync_claude_mcp "$HOME/.claude.json"
 
   local before after
   before=$(jq -cS '.' "$HOME/.claude.json")
@@ -94,7 +96,7 @@ teardown() {
   after=$(jq -cS '.' "$HOME/.claude.json")
   assert_equal "$before" "$after"
 
-  sync_claude_mcp_state "$HOME/.claude.json"
+  sync_claude_mcp "$HOME/.claude.json"
   after=$(jq -cS '.' "$HOME/.claude.json")
   assert_equal "$before" "$after"
 }

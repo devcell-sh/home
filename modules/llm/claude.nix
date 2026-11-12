@@ -36,7 +36,7 @@
       env = s.env or {};
     };
 
-  # All registered servers (have command or url) — fragments filter at runtime
+  # All registered servers (have command or url) — mcp-toggle filters at runtime
   # using DEVCELL_MCP_ENABLED env var from .devcell.toml [mcp] enabled=[...].
   allServers = lib.filterAttrs (_: s: (s ? command) || (s ? url)) mcpCfg.servers;
 
@@ -65,7 +65,7 @@ in {
       default = {};
       description = ''
         Shell scripts staged to /etc/claude-code/hooks/<name> at image build
-        time and copied to ~/.claude/hooks/<name> by entrypoint.sh on start.
+        time and copied to ~/.claude/hooks/<name> by the s6 claude-config service on start.
       '';
     };
 
@@ -78,7 +78,7 @@ in {
       default = claudeConfig;
       internal = true;
       readOnly = true;
-      description = "Nix-store path of the generated Claude MCP servers JSON (empty mcpServers when no servers enabled, so the entrypoint cleanup still removes stale /opt/devcell/ entries).";
+      description = "Nix-store path of the generated Claude MCP servers JSON (empty mcpServers when no servers enabled, so the s6 config service still removes stale /opt/devcell/ entries).";
     };
   };
 
@@ -129,7 +129,7 @@ in {
             $DRY_RUN_CMD sudo cp ${settingsFile} /etc/claude-code/nix-settings.json
           ''}
           # Always stage the MCP servers file (even when empty) so the
-          # entrypoint cleanup removes stale /opt/devcell/ servers on stack switch.
+          # s6 config service removes stale /opt/devcell/ servers on stack switch.
           $DRY_RUN_CMD sudo rm -f /etc/claude-code/managed-mcp.json
           $DRY_RUN_CMD sudo cp ${claudeConfig} /etc/claude-code/nix-mcp-servers.json
         else

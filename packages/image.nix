@@ -29,7 +29,7 @@
   # Real wall-clock timestamp for the build, threaded in via env var so
   # the runner can stamp every `cell build` with "now". Empty when nix is
   # invoked in pure-eval mode (e.g., `nix flake check`) — falls back to a
-  # safe placeholder that the entrypoint surfaces as "unknown".
+  # safe placeholder surfaced as "unknown".
   #
   # Cost: only the IMAGE MANIFEST derivation re-runs when this changes.
   # Layer blobs are content-addressed by their actual contents (not by
@@ -50,7 +50,7 @@
     let v = builtins.getEnv "DEVCELL_BUILD_REV";
     in if v == "" then "unknown" else v;
 
-  # Build metadata that the entrypoint reads at container start.
+  # Build metadata read at container start.
   #
   # DELIBERATELY does NOT interpolate buildDate/buildRev — that would
   # change the file content every `cell build` invocation, which would
@@ -103,7 +103,6 @@
     set -e
     mkdir -p $out/opt/devcell
     mkdir -p $out/opt/devcell/.local/state/nix/profiles
-    mkdir -p $out/etc/devcell/entrypoint.d
     mkdir -p $out/etc/sudoers.d
     mkdir -p $out/etc $out/tmp $out/usr/local/bin
     # /tmp MUST be 1777 (world-writable + sticky). Standard Linux distros
@@ -242,19 +241,11 @@
     mkdir -p $out/etc/fonts
     ln -sfn /opt/devcell/.config/fontconfig/conf.d $out/etc/fonts/conf.d
 
-    # Stage entrypoint fragments to /etc/devcell/entrypoint.d/ — what
-    # base.nix's home.activation.stageEntrypoints does at switch time.
-    if [ -d "$out/opt/devcell/.config/devcell/entrypoint.d" ]; then
-      cp -aL "$out/opt/devcell/.config/devcell/entrypoint.d/." \
-        $out/etc/devcell/entrypoint.d/
-      chmod -R +x $out/etc/devcell/entrypoint.d/
-    fi
-
     # Marker so home.activation.* knows to no-op if a user ever runs
     # `home-manager switch` inside this container.
     touch $out/etc/devcell/.image-built-with-nix2container
 
-    # /etc/devcell/metadata.json — entrypoint.sh reads this for the
+    # /etc/devcell/metadata.json — read at boot for the
     # "Base image / User image / Stack | Modules | Nix packages" status line.
     # base.nix's home.activation.writeMetadata explicitly skips writing this
     # when the .image-built-with-nix2container marker exists, so the pure
@@ -282,7 +273,7 @@
     # Mirror of home.activation.setupManaged{Claude,Codex,Opencode,Gemini} in
     # the LLM modules. Each module runs `sudo cp ''${cfg} /etc/<agent>/...` at
     # home-manager switch time — but the pure path skips activation entirely.
-    # Without these files, fragments/30-*.sh short-circuits at
+    # Without these files, the s6 config services short-circuit at
     # `[ -f "$nix_file" ] || return 0` and the user's ~/.claude.json etc.
     # never receive nix-declared MCP servers like inkscape-mcp.
     #
@@ -309,7 +300,7 @@
 
     # Pre-baked /etc/passwd, /etc/group, /etc/shadow for the devcell user.
     # Required because nix2container has no /etc/ from a Debian base — we
-    # build the minimum the entrypoint expects.
+    # build the minimum the boot process expects.
     cat > $out/etc/passwd <<EOF
     root:x:0:0:root:/root:${pkgs.bashInteractive}/bin/bash
     devcell:x:1000:1000:devcell:/opt/devcell:${pkgs.bashInteractive}/bin/bash
@@ -329,7 +320,7 @@
     EOF
     chmod 0640 $out/etc/shadow
 
-    # /etc/sudoers — entrypoint adds session user via /etc/sudoers.d/host-user
+    # /etc/sudoers — the CLI adds session user via /etc/sudoers.d/host-user
     # at runtime, so the base sudoers just needs the include directive.
     #
     # env_keep preserves nix-related env across sudo. Defaults env_reset
@@ -374,8 +365,8 @@
     PAMEOF
     chmod 0644 $out/etc/pam.d/sudo
 
-    # Pre-create /etc/nsswitch.conf so getent works (used by entrypoint
-    # docker-group lookup).
+    # Pre-create /etc/nsswitch.conf so getent works (used by
+    # docker-group lookup at boot).
     cat > $out/etc/nsswitch.conf <<EOF
     passwd:    files
     group:     files
@@ -384,10 +375,8 @@
     networks:  files
     EOF
 
-    # entrypoint.sh — canonical at nixhome/entrypoint.sh. Inside the flake
-    # source so nix2container can read it directly; images/Dockerfile reads
-    # the SAME file via `COPY nixhome/entrypoint.sh ...` (docker-bake context
-    # is the repo root, so both paths converge on one source of truth).
+    # entrypoint.sh — minimal init stub (sleep infinity). The CLI runs
+    # s6 activation via docker exec after the container starts.
     cp ${../entrypoint.sh} $out/usr/local/bin/entrypoint.sh
     chmod 755 $out/usr/local/bin/entrypoint.sh
 
@@ -426,7 +415,7 @@
     # privileged context that starts the daemon.
   '';
 
-  # System tools the entrypoint script needs at runtime.
+  # System tools the boot process needs at runtime.
   # Not the same as homeConfig packages — these are root-time utilities.
   # Parity target: every apt-installed package in images/Dockerfile:32-48.
   systemTools = pkgs.buildEnv {
@@ -439,22 +428,18 @@
       gnused
       gnugrep
       shadow # useradd, groupadd, usermod (Debian: passwd package)
-      glibc.getent # getent (Debian: libc-bin); used by entrypoint for docker-socket group lookup
+      glibc.getent # getent (Debian: libc-bin); used for docker-socket group lookup
       openssl # SSL cert + RDP password generation in 50-gui.sh
       sudo
       gosu
       tini
-      jq # entrypoint reads /etc/devcell/metadata.json with jq
+      jq # reads /etc/devcell/metadata.json
       procps # ps, pgrep
       iproute2 # ip
       iputils # ping
-      util-linux # setsid, dmesg, mount, etc. CRITICAL: setsid is what
-                 # detaches Xvfb/x11vnc/fluxbox/xrdp from the entrypoint's
-                 # controlling TTY in 50-gui.sh. Without it, claude (TUI)
-                 # signal-kills them on connection → RDP shows "operation
-                 # now in progress" + "error connecting to user session".
+      util-linux # setsid, dmesg, mount, etc.
       cacert # SSL certs for HTTP clients
-      curl # HTTP client — used by entrypoint fragments + OAuth flows + many user workflows. Parity with apt curl in Dockerfile.
+      curl # HTTP client — used by OAuth flows + many user workflows. Parity with apt curl in Dockerfile.
       zsh # default login shell for the session user (Dockerfile installs via apt; nix-built equivalent here)
       # docker — full client package. Provides /bin/docker + the `docker compose` subcommand
       # plugin. We use `docker` (not `docker-client`) because the slimmer client variant in some
@@ -801,10 +786,9 @@ in
     #   the file '/nix' already exists in the tar with perms []types.Perm(nil)
     #   but is overridden with perms […Regex:".*", Mode:"0755"…]
     #
-    # Workaround: the runtime entrypoint runs as root and does the
-    # `chmod 4755` against the real /nix/store/...-sudo/bin/sudo path
-    # directly. See nixhome/modules/fragments/04-nix-daemon.sh — same
-    # fragment that starts nix-daemon also fixes up suid + /nix/var dirs.
+    # Workaround: the s6 system-fixups oneshot runs as root and does the
+    # `install -m 4755` against the real /nix/store/...-sudo/bin/sudo path
+    # at boot time (CELL-358), also creating /nix/var dirs.
 
     config = {
       Entrypoint = [
@@ -813,12 +797,12 @@ in
         "/usr/local/bin/entrypoint.sh"
       ];
       Cmd = ["tail" "-f" "/dev/null"];
-      User = "0:0"; # entrypoint runs as root, drops to HOST_USER via gosu
+      User = "0:0"; # init runs as root, s6 drops to HOST_USER
       WorkingDir = "/";
       Env = [
         "HOME=/opt/devcell"
         "USER=devcell"
-        # /run/wrappers/bin first: the entrypoint installs a setuid sudo copy
+        # /run/wrappers/bin first: system-fixups installs a setuid sudo copy
         # there (CELL-358) and it must shadow the non-setuid store sudo.
         "PATH=/run/wrappers/bin:/opt/devcell/.local/state/nix/profiles/profile/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         "DEVCELL_PROFILE=devcell-${stackName}"

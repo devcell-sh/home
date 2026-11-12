@@ -12,6 +12,12 @@ REPO_HOMEDIR="${REPO_HOMEDIR:-}"
 
 export FONTCONFIG_PATH="$DEVCELL_HOME/.config/fontconfig"
 
+# Browser profile paths for Chromium and Playwright MCP
+_CHROME_PROFILE="${HOME}/.chrome/${APP_NAME:-cell}"
+mkdir -p /etc/s6/env
+echo "$_CHROME_PROFILE" > /etc/s6/env/CHROMIUM_PROFILE_PATH
+echo "$_CHROME_PROFILE" > /etc/s6/env/PLAYWRIGHT_MCP_USER_DATA_DIR
+
 if [ -d "$REPO_HOMEDIR" ]; then
     rsync -a --copy-links --ignore-existing --exclude=.claude \
         --chown="$HOST_USER" "$REPO_HOMEDIR/" "$HOME/"

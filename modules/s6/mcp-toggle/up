@@ -222,6 +222,28 @@ sync_opencode_mcp() {
     ' "$nix_file")
 }
 
+# --- Convenience wrappers (used by tests) ---
+
+disableMcp() {
+    local tool="$1" name="$2" config="$3"
+    case "$tool" in
+        claude)  _claude_mcp_set "$config" "$4" "$name" disable ;;
+        codex)   _codex_mcp_set "$config" "$name" disable ;;
+        opencode) _opencode_mcp_set "$config" "$name" disable ;;
+        *) echo "disableMcp: unknown tool: $tool" >&2; return 1 ;;
+    esac
+}
+
+enableMcp() {
+    local tool="$1" name="$2" config="$3"
+    case "$tool" in
+        claude)  _claude_mcp_set "$config" "$4" "$name" enable ;;
+        codex)   _codex_mcp_set "$config" "$name" enable ;;
+        opencode) _opencode_mcp_set "$config" "$name" enable ;;
+        *) echo "enableMcp: unknown tool: $tool" >&2; return 1 ;;
+    esac
+}
+
 # --- Run all three ---
 
 sync_claude_mcp "$HOME/.claude.json"

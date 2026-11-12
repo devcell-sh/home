@@ -10,12 +10,11 @@ setup() {
   export HOSTNAME="cell-test-project"
   mkdir -p "$HOME/.config/opencode" "$DEVCELL_HOME"
 
-  source "$REPO_ROOT/modules/fragments/mcp-toggle.sh"
+  source_s6_functions "mcp-toggle/up"
 
-  FRAGMENT="$REPO_ROOT/modules/fragments/30-opencode.sh"
-  eval "$(sed -n '/^_mcp_enabled_json()/,/^}/p' "$FRAGMENT")"
-  eval "$(sed -n '/^merge_opencode_providers()/,/^}/p' "$FRAGMENT")"
-  eval "$(sed -n '/^merge_opencode_mcp()/,/^}/p' "$FRAGMENT")"
+  S6_OC="$REPO_ROOT/modules/s6/opencode-config/up"
+  eval "$(sed -n '/^merge_opencode_providers()/,/^}/p' "$S6_OC")"
+  eval "$(sed -n '/^merge_opencode_mcp()/,/^}/p' "$S6_OC")"
 
   sudo mkdir -p /etc/opencode
 

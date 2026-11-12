@@ -101,7 +101,7 @@
       nixos          = { description = "Nix dev tooling: nix-tree, nix-diff, nixfmt, deadnix, statix, nom"; mcpServers = []; sizeMb = 30; };
       node           = { description = "Node.js runtime (mise) + Hugo static site generator"; mcpServers = []; sizeMb = 200; };
       plex           = { description = "Plex Media Server control via MCP — needs PLEX_URL + PLEX_TOKEN"; mcpServers = ["plex"]; sizeMb = 80; };
-      postgresql     = { description = "Local PostgreSQL 17 — auto-started in entrypoint, default db created"; mcpServers = []; sizeMb = 60; };
+      postgresql     = { description = "Local PostgreSQL 17 — s6-managed, default db created"; mcpServers = []; sizeMb = 60; };
       project-management = { description = "Hubstaff time tracking, n8n workflows, Linear (HTTP), Atlassian Jira/Confluence (HTTP)"; mcpServers = ["hubstaff-mcp" "n8n" "linear-server" "atlassian"]; sizeMb = 250; };
       publishing     = { description = "Document publishing: LaTeX + Pandoc + Typst + Marp slides + Biber bibliography"; mcpServers = []; sizeMb = 1700; };
       python         = { description = "Python runtime (mise) + uv fast package manager"; mcpServers = []; sizeMb = 250; };

@@ -4,7 +4,7 @@ load helper_test
 
 setup() {
   TMPDIR_TEST="$(mktemp -d)"
-  extract_function "$REPO_ROOT/modules/fragments/30-claude.sh" seed_claude_trust
+  extract_function "$REPO_ROOT/modules/s6/claude-config/up" seed_claude_trust
   log() { :; }
 }
 

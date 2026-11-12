@@ -1,5 +1,5 @@
 # antigravity.nix — Antigravity CLI (Google's successor to gemini-cli).
-# MCP server staging and entrypoint merge logic, mirroring gemini.nix.
+# MCP server staging and s6 merge logic, mirroring gemini.nix.
 # Config lives in ~/.gemini/config/mcp_config.json (same ~/.gemini/ tree,
 # different sub-path and field polarity: `disabled` instead of `enabled`).
 {

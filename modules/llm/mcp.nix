@@ -44,7 +44,7 @@ in {
     backupBeforeMerge = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Whether entrypoint.sh should back up user config files before merging nix MCP servers (Claude, OpenCode, Codex).";
+      description = "Whether s6 config services should back up user config files before merging nix MCP servers (Claude, OpenCode, Codex).";
     };
   };
 

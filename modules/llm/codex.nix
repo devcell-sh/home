@@ -1,4 +1,4 @@
-# codex.nix — Codex CLI from npm + MCP server staging and entrypoint merge logic.
+# codex.nix — Codex CLI from npm + MCP server staging and s6 merge logic.
 {
   pkgs,
   pkgsEdge,
@@ -145,7 +145,7 @@ in
       default = codexConfig;
       internal = true;
       readOnly = true;
-      description = "Nix-store path of the generated Codex MCP servers TOML (empty mcp_servers when no servers enabled, so the entrypoint cleanup still removes stale /opt/devcell/ entries).";
+      description = "Nix-store path of the generated Codex MCP servers TOML (empty mcp_servers when no servers enabled, so the s6 config service still removes stale /opt/devcell/ entries).";
     };
     nixProvidersConfigFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
@@ -226,7 +226,7 @@ in
           $DRY_RUN_CMD sudo mkdir -p /etc/codex
           $DRY_RUN_CMD sudo rm -f /etc/codex/managed_config.toml
           # Always stage the MCP servers file (even when empty) so the
-          # entrypoint cleanup removes stale /opt/devcell/ servers on stack switch.
+          # s6 config service removes stale /opt/devcell/ servers on stack switch.
           $DRY_RUN_CMD sudo cp ${codexConfig} /etc/codex/nix-mcp-servers.toml
           ${lib.optionalString hasProviders ''
             $DRY_RUN_CMD sudo cp ${codexProvidersConfig} /etc/codex/nix-providers.toml

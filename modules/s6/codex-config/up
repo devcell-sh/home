@@ -63,7 +63,63 @@ if [ -f "$config_toml" ] && grep -q '^oss_provider = "lms"' "$config_toml"; then
     sed -i '/^oss_provider = "lms"/d' "$config_toml" 2>/dev/null || true
 fi
 
+# Strip legacy [profiles.*] tables — this Codex version refuses to start
+# with --profile while any such table exists in config.toml.
+if [ -f "$config_toml" ] && command -v python3 >/dev/null 2>&1 && grep -q '^\[profiles\.' "$config_toml"; then
+    python3 - "$config_toml" << 'PYEOF'
+import re, sys
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+original = content
+pattern = re.compile(r'\n\[profiles\.[^\]]*\]\n(?:(?!\[)[^\n]*\n?)*')
+while True:
+    new_content, n = pattern.subn('\n', content, count=1)
+    if n == 0:
+        break
+    content = new_content
+if content != original:
+    with open(path, 'w') as f:
+        f.write(content)
+PYEOF
+fi
+
 merge_codex_mcp "$HOME/.codex/config.toml"
+
+# Sync nix-managed Codex profiles (separate flat files, not config.toml tables)
+_codex_profiles_src="/etc/codex/nix-codex-profiles"
+if [ -d "$_codex_profiles_src" ]; then
+    _codex_dest="$HOME/.codex"
+    _codex_manifest="$_codex_dest/.devcell-managed-profiles"
+    mkdir -p "$_codex_dest"
+
+    # Remove profiles that were nix-managed before but aren't declared anymore
+    if [ -f "$_codex_manifest" ]; then
+        while IFS= read -r _prev_name; do
+            [ -n "$_prev_name" ] || continue
+            _is_current=0
+            if [ -f "$_codex_profiles_src/.devcell-managed-profiles" ]; then
+                while IFS= read -r _cur; do
+                    [ "$_prev_name" = "$_cur" ] && _is_current=1 && break
+                done < "$_codex_profiles_src/.devcell-managed-profiles"
+            fi
+            [ "$_is_current" -eq 0 ] && rm -f "$_codex_dest/${_prev_name}.config.toml"
+        done < "$_codex_manifest"
+    fi
+
+    # Stage current profiles (nix always wins for its own names)
+    if [ -f "$_codex_profiles_src/.devcell-managed-profiles" ]; then
+        while IFS= read -r _name; do
+            [ -n "$_name" ] || continue
+            [ -f "$_codex_profiles_src/${_name}.config.toml" ] || continue
+            cp "$_codex_profiles_src/${_name}.config.toml" "$_codex_dest/${_name}.config.toml"
+            chmod u+w "$_codex_dest/${_name}.config.toml"
+        done < "$_codex_profiles_src/.devcell-managed-profiles"
+        cp "$_codex_profiles_src/.devcell-managed-profiles" "$_codex_manifest" 2>/dev/null
+        chmod u+w "$_codex_manifest" 2>/dev/null
+    fi
+fi
+
 [ -d "$HOME/.codex" ] && chown -R "$HOST_USER" "$HOME/.codex"
 
 devcell-event "up"

@@ -3,7 +3,7 @@
 load helper_test
 
 setup() {
-  TMPDIR_TEST="$(mktemp -d)"
+  export TMPDIR_TEST="$(mktemp -d)"
   export HOME="$TMPDIR_TEST/home"
   export HOST_USER="$(id -un)"
   export MISE_SYSTEM_CONFIG_DIR="$TMPDIR_TEST/etc-mise"
@@ -15,7 +15,13 @@ setup() {
 echo "\$*" >> "$TMPDIR_TEST/mise.calls"
 [ "\${FAKE_MISE_EXIT:-0}" = 0 ] || { echo "error: pipx:nope not found" >&2; exit 1; }
 FAKEMISE
-  chmod +x "$TMPDIR_TEST/bin/mise"
+  cat > "$TMPDIR_TEST/bin/devcell-event" <<'EVTEOF'
+#!/bin/bash
+if [ "$1" = "pipe" ]; then cat >/dev/null
+elif [ "$1" = "warn" ]; then shift; echo "$*" >> "${TMPDIR_TEST:-/tmp}/log"
+fi
+EVTEOF
+  chmod +x "$TMPDIR_TEST/bin/mise" "$TMPDIR_TEST/bin/devcell-event"
 
   CONF="$TMPDIR_TEST/etc-mise/conf.d/devcell-packages.toml"
   TOOLS='[tools]
@@ -30,8 +36,8 @@ teardown() {
 run_fragment() {
   (
     export PATH="$TMPDIR_TEST/bin:$PATH"
-    log() { echo "$*" >> "$TMPDIR_TEST/log"; }
-    source "$REPO_ROOT/modules/fragments/11-mise-packages.sh"
+    export SESSION_HOME="$HOME"
+    bash "$REPO_ROOT/modules/s6/mise-packages/up" || true
   )
 }
 
@@ -53,9 +59,7 @@ run_fragment() {
   BAD='[tools]
 "pipx:nope" = "latest"'
   DEVCELL_MISE_PACKAGES="$BAD" FAKE_MISE_EXIT=1 run_fragment
-  run grep -c '⚠ \[packages.python\]/\[packages.node\] install failed' "$TMPDIR_TEST/log"
-  assert_output "1"
-  run grep -c 'pipx:nope not found' "$TMPDIR_TEST/log"
+  run grep -c 'install failed' "$TMPDIR_TEST/log"
   assert_output "1"
 
   rm -f "$TMPDIR_TEST/mise.calls"
