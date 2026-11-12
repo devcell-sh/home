@@ -1,0 +1,38 @@
+#!/bin/sh
+set -e
+
+devcell-event "activating"
+
+# peer-memory: register peer-memory MCP server for Codex.
+# Claude's peer-memory MCP is registered via managedMcp.servers in peer-memory.nix
+# and merged by claude-config. This oneshot only handles Codex's config.toml.
+# Only activates when DEVCELL_PEER_MEMORY=true (set by runner.go when
+# [agents] peer_memory = true).
+
+[ "${DEVCELL_PEER_MEMORY:-}" = "true" ] || { devcell-event "skipped"; exit 0; }
+
+HOST_USER="${HOST_USER:-$(id -un)}"
+HOME="${SESSION_HOME:-/home/$HOST_USER}"
+DEVCELL_HOME="${DEVCELL_HOME:-/opt/devcell}"
+BIN="$DEVCELL_HOME/.local/state/nix/profiles/profile/bin/peer-memory-mcp"
+
+project_dir="${DEVCELL_PROJECT_DIR:-}"
+[ -n "$project_dir" ] || { devcell-event "error" "DEVCELL_PROJECT_DIR not set"; exit 1; }
+
+[ -x "$BIN" ] || { devcell-event "error" "peer-memory-mcp not found at $BIN"; exit 1; }
+
+# ── Codex: register peer-memory MCP (reads Claude memories) ──
+codex_toml="$HOME/.codex/config.toml"
+if [ -f "$codex_toml" ]; then
+    if ! grep -q '^\[mcp_servers\.peer-memory\]' "$codex_toml"; then
+        cat >> "$codex_toml" <<TOML
+
+[mcp_servers.peer-memory]
+command = "$BIN"
+args = ["--source=claude", "--project-dir=$project_dir"]
+TOML
+        chown "$HOST_USER" "$codex_toml" 2>/dev/null || true
+    fi
+fi
+
+devcell-event "up"

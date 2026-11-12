@@ -14,6 +14,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mcp-nixos.url = "github:utensils/mcp-nixos";
+    devcell.url = "github:devcell-sh/devcell";
 
     # nix2container: parallel image build path (spike). Produces content-addressed
     # OCI images alongside images/Dockerfile. See ./packages/image.nix.
@@ -30,6 +31,7 @@
     home-manager,
     nix-darwin,
     mcp-nixos,
+    devcell,
     nix2container,
   }: let
     lib = nixpkgs.lib;
@@ -53,7 +55,7 @@
     in
       home-manager.lib.homeManagerConfiguration {
         pkgs = import nixpkgs nixCfg;
-        extraSpecialArgs = {inherit self mcp-nixos pkgsUnstable pkgsEdge;};
+        extraSpecialArgs = {inherit self mcp-nixos devcell pkgsUnstable pkgsEdge;};
         modules =
           [
             {
@@ -160,7 +162,7 @@
     in
       home-manager.lib.homeManagerConfiguration {
         pkgs = import nixpkgs nixCfg;
-        extraSpecialArgs = {inherit self mcp-nixos pkgsUnstable pkgsEdge;};
+        extraSpecialArgs = {inherit self mcp-nixos devcell pkgsUnstable pkgsEdge;};
         modules =
           [
             {
@@ -198,7 +200,7 @@
     in
       home-manager.lib.homeManagerConfiguration {
         pkgs = import nixpkgs nixCfg;
-        extraSpecialArgs = {inherit self mcp-nixos pkgsUnstable pkgsEdge;};
+        extraSpecialArgs = {inherit self mcp-nixos devcell pkgsUnstable pkgsEdge;};
         modules =
           [
             {
@@ -224,7 +226,7 @@
     in
       home-manager.lib.homeManagerConfiguration {
         pkgs = import nixpkgs nixCfg;
-        extraSpecialArgs = {inherit self mcp-nixos pkgsUnstable pkgsEdge;};
+        extraSpecialArgs = {inherit self mcp-nixos devcell pkgsUnstable pkgsEdge;};
         modules =
           [
             {
@@ -373,7 +375,7 @@
         cfg = home-manager.lib.homeManagerConfiguration {
           pkgs = import nixpkgs nixCfg;
           extraSpecialArgs = {
-            inherit self mcp-nixos;
+            inherit self mcp-nixos devcell;
             pkgsUnstable = import nixpkgs-unstable nixCfg;
             pkgsEdge = import nixpkgs-edge nixCfg;
           };
@@ -414,7 +416,7 @@
         cfg = home-manager.lib.homeManagerConfiguration {
           pkgs = import nixpkgs nixCfg;
           extraSpecialArgs = {
-            inherit self mcp-nixos;
+            inherit self mcp-nixos devcell;
             pkgsUnstable = import nixpkgs-unstable nixCfg;
             pkgsEdge = import nixpkgs-edge nixCfg;
           };
@@ -587,7 +589,7 @@
           home-manager.darwinModules.home-manager
           {
             home-manager.extraSpecialArgs = {
-              inherit self mcp-nixos;
+              inherit self mcp-nixos devcell;
               pkgsUnstable = import nixpkgs-unstable {
                 system = "aarch64-darwin";
                 config.allowUnfree = true;
