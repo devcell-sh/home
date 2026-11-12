@@ -23,9 +23,18 @@ if [ -n "$HM_GENERATION" ] && [ -d "$HM_GENERATION" ]; then
     ln -sfn "$HM_GENERATION" "/nix/var/nix/gcroots/devcell/${HM_PROFILE_HASH}-generation"
 fi
 
-_project_name="${DEVCELL_PROJECT_NAME:-unknown}"
-cat > "/nix/var/nix/gcroots/devcell/${HM_PROFILE_HASH}-meta" <<METAEOF
-project=${_project_name}
+_cell_name="${CELL_NAME:-unknown}"
+_meta_path="/nix/var/nix/gcroots/devcell/${HM_PROFILE_HASH}-meta"
+_existing_cells=""
+if [ -f "$_meta_path" ]; then
+    _existing_cells=$(grep '^cell=' "$_meta_path" 2>/dev/null | cut -d= -f2)
+fi
+case ",$_existing_cells," in
+    *",$_cell_name,"*) _merged_cells="$_existing_cells" ;;
+    *) _merged_cells="${_existing_cells:+${_existing_cells},}${_cell_name}" ;;
+esac
+cat > "$_meta_path" <<METAEOF
+cell=${_merged_cells}
 stack=${DEVCELL_STACK:-unknown}
 modules=${DEVCELL_MODULES:-}
 profile=${HM_PROFILE}
