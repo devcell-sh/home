@@ -2,10 +2,7 @@
 set -e
 
 # system-fixups (Linux): privileged boot-time fixes that must run as root.
-# Covers /tmp permissions, setuid sudo wrapper, nix state dirs, and stale
-# nix-store symlink cleanup from persistent $HOME.
-
-SESSION_HOME="${SESSION_HOME:-/home/${HOST_USER:-devcell}}"
+# Covers /tmp permissions, setuid sudo wrapper, and nix state dirs.
 
 devcell-event "activating"
 
@@ -55,22 +52,5 @@ chmod 1777 \
     /nix/var/nix/temproots \
     /nix/var/nix/userpool 2>/dev/null || true
 chmod 0755 /nix/var/nix/daemon-socket 2>/dev/null || true
-
-# ── Stale symlink cleanup ───────────────────────────────────────────────
-# $HOME is a bind mount that survives image rebuilds. Home-manager symlinks
-# from previous builds dangle after nix GC removes old store paths.
-if [ -d "$SESSION_HOME" ]; then
-    find "$SESSION_HOME" -maxdepth 4 -type l \
-        -not -path "*/tmp/*" \
-        -not -path "$SESSION_HOME/.config/devcell/*" \
-        2>/dev/null | while IFS= read -r _link; do
-        _target=$(readlink "$_link" 2>/dev/null)
-        case "$_target" in /nix/store/*)
-            if [ ! -e "$_link" ]; then
-                rm -f "$_link"
-            fi
-        ;; esac
-    done
-fi
 
 devcell-event "up"

@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+# $HOME is a bind mount that survives image rebuilds. Home-manager symlinks
+# from previous builds dangle after nix GC removes old store paths.
+# Split out of system-fixups so it doesn't block nix-daemon startup.
+
+SESSION_HOME="${SESSION_HOME:-/home/${HOST_USER:-devcell}}"
+
+devcell-event "activating"
+
+if [ -d "$SESSION_HOME" ]; then
+    find "$SESSION_HOME" -maxdepth 4 -type l \
+        -not -path "*/tmp/*" \
+        -not -path "$SESSION_HOME/.config/devcell/*" \
+        2>/dev/null | while IFS= read -r _link; do
+        _target=$(readlink "$_link" 2>/dev/null)
+        case "$_target" in /nix/store/*)
+            if [ ! -e "$_link" ]; then
+                rm -f "$_link"
+            fi
+        ;; esac
+    done
+fi
+
+devcell-event "up"
