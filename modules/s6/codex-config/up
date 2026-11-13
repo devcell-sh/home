@@ -120,6 +120,6 @@ if [ -d "$_codex_profiles_src" ]; then
     fi
 fi
 
-[ -d "$HOME/.codex" ] && chown -R "$HOST_USER" "$HOME/.codex"
+[ -d "$HOME/.codex" ] && chown -R "$HOST_USER" "$HOME/.codex" 2>/dev/null || true
 
 devcell-event "up"

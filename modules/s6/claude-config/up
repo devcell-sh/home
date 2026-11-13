@@ -44,7 +44,7 @@ merge_claude_nix() {
     nix_settings="/etc/claude-code/nix-settings.json"
     if [ -d "$nix_hooks_dir" ] && [ -n "$(ls -A "$nix_hooks_dir" 2>/dev/null)" ]; then
         mkdir -p "$HOME/.claude/hooks"
-        rsync -a --chmod=+x --delete \
+        rsync -rlpt --chmod=+x --delete \
             "$nix_hooks_dir/" "$HOME/.claude/hooks/"
         chown -R "$HOST_USER" "$HOME/.claude/hooks" 2>/dev/null || true
     fi
