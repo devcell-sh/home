@@ -1,4 +1,8 @@
 #!/bin/sh
 
+# Remove stale socket left by a previous container on the persistent /nix volume.
+rm -f /nix/var/nix/daemon-socket/socket
+
+exec 2>&1
 devcell-event fork s6-notifyoncheck -d -s 500 -t 30000 \
     nix-daemon
