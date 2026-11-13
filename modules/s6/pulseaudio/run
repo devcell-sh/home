@@ -13,7 +13,8 @@ if [ -n "$XRDP_PULSE_MOD" ]; then
     _PA_DL_SEARCH="--dl-search-path=$(dirname "$XRDP_PULSE_MOD")"
 fi
 
-devcell-event fork gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+devcell-event fork s6-notifyoncheck -d -s 200 -t 10000 \
+    gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     pulseaudio --exit-idle-time=-1 --disable-shm=true -n \
     --log-level=info \

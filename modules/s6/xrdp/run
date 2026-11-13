@@ -6,5 +6,6 @@
 XRDP_CFG="/tmp/xrdp/xrdp.ini"
 [ -f "$XRDP_CFG" ] || exit 0
 
-devcell-event fork env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+devcell-event fork s6-notifyoncheck -d -s 200 -t 10000 \
+    env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
     xrdp --nodaemon --config "$XRDP_CFG"

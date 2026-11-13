@@ -52,15 +52,21 @@ let
             FD="/proc/self/fd/8"
           fi
           _svc="/run/service/$SERVICE"
+          _want_ready=false
+          [ -f "$_svc/notification-fd" ] && _want_ready=true
           _tries=0
           sleep 0.3
           while [ $_tries -lt 60 ]; do
             if [ -d "$_svc/supervise" ]; then
               _st=$(s6-svstat "$_svc" 2>/dev/null) || true
               case "$_st" in
-                up*) _emit "up"; exit 0 ;;
                 down*) _emit "failed" "service exited"; exit 0 ;;
               esac
+              if $_want_ready; then
+                case "$_st" in *ready*) _emit "up"; exit 0 ;; esac
+              else
+                case "$_st" in up*) _emit "up"; exit 0 ;; esac
+              fi
             fi
             sleep 0.5
             _tries=$((_tries + 1))

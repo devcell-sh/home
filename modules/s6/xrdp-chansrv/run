@@ -19,7 +19,8 @@ XRDP_RUN_DIR="/var/run/xrdp/$_UID"
 mkdir -p "$XRDP_RUN_DIR"
 chown "$HOST_USER:$(id -gn "$HOST_USER")" "$XRDP_RUN_DIR"
 
-devcell-event fork gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
+devcell-event fork s6-notifyoncheck -d -s 500 -t 15000 \
+    gosu "$HOST_USER" env -u LD_LIBRARY_PATH -u _DEVCELL_LD_SET \
     DISPLAY=:${DISPLAY_NUM} \
     HOME="$SESSION_HOME" \
     CHANSRV_LOG_PATH="/tmp" \

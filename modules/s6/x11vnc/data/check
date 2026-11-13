@@ -1,0 +1,2 @@
+#!/bin/sh
+ss -tln sport = :5900 | grep -q LISTEN
