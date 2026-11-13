@@ -33,7 +33,7 @@ let
   # Chromium browser from playwright-driver -- chromium only, no firefox/webkit/ffmpeg.
   # patchright-core reads browsers.json for expected revision (e.g. 1234) but nixpkgs
   # playwright-driver may ship a different revision (e.g. 1194). Bridge with symlinks.
-  patchrightChromiumRevision = "1234";
+  patchrightChromiumRevision = "1243";
   baseBrowsers = pkgs.playwright-driver.browsers.override {
     withFirefox = false;
     withWebkit = false;
