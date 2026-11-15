@@ -223,6 +223,7 @@ in {
     expect # provides unbuffer — forces PTY for commands that need a TTY
     tmux # terminal multiplexer
     tmuxp # tmux session manager
+    chafa # terminal image viewer (use: chafa image.png)
     tree # directory listing
     unzip # archive extraction
     _7zz # 7-Zip official upstream (use: 7zz x archive.7z)
