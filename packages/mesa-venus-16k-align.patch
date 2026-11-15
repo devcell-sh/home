@@ -1,0 +1,73 @@
+Force 16 KiB alignment for Venus (virtio-vulkan) allocations.
+
+Required for GPU passthrough on containers running inside libkrun/krunkit
+VMs on Apple Silicon. Without this patch, every Vulkan call fails with
+VK_ERROR_OUT_OF_HOST_MEMORY because Apple Silicon uses 16 KiB pages but
+the Linux guest allocates at 4 KiB granularity.
+
+Origin: https://gitlab.freedesktop.org/slp/mesa/-/commit/761ef1ec5ff2aae1cc3dc8bbc22b3d06ef04b549
+Upstream status: not merged; proper fix is VIRTIO_GPU_F_BLOB_ALIGNMENT (kernel pending)
+
+--- a/src/virtio/vulkan/vn_ring.c
++++ b/src/virtio/vulkan/vn_ring.c
+@@ -9,6 +9,8 @@
+
+ #include "venus-protocol/vn_protocol_driver_transport.h"
+
++#include "util/u_math.h"
++
+ #include "vn_cs.h"
+ #include "vn_instance.h"
+ #include "vn_renderer.h"
+@@ -264,7 +266,8 @@
+    layout->extra_offset = layout->buffer_offset + layout->buffer_size;
+    layout->extra_size = extra_size;
+
+-   layout->shmem_size = layout->extra_offset + layout->extra_size;
++   layout->shmem_size =
++      align64(layout->extra_offset + layout->extra_size, 16384);
+ }
+
+ struct vn_ring *
+--- a/src/virtio/vulkan/vn_renderer_virtgpu.c
++++ b/src/virtio/vulkan/vn_renderer_virtgpu.c
+@@ -1244,7 +1244,9 @@
+    struct virtgpu *gpu = (struct virtgpu *)renderer;
+    const uint32_t blob_flags =
+       virtgpu_bo_blob_flags(gpu, flags, external_handles);
+
++   size = align64(size, 16384);
++
+    uint32_t res_id;
+    uint32_t gem_handle = virtgpu_ioctl_resource_create_blob(
+       gpu, gpu->bo_blob_mem, blob_flags, size, mem_id, &res_id);
+@@ -1295,6 +1297,8 @@
+ {
+    struct virtgpu *gpu = (struct virtgpu *)renderer;
+
++   size = align64(size, 16384);
++
+    struct vn_renderer_shmem *cached_shmem =
+       vn_renderer_shmem_cache_get(&gpu->shmem_cache, size);
+    if (cached_shmem) {
+--- a/src/virtio/vulkan/vn_device_memory.c
++++ b/src/virtio/vulkan/vn_device_memory.c
+@@ -14,6 +14,7 @@
+ #include "venus-protocol/vn_protocol_driver_transport.h"
+ #include "vk_debug_utils.h"
+
++#include "util/u_math.h"
+ #include "vn_android.h"
+ #include "vn_buffer.h"
+ #include "vn_device.h"
+@@ -31,6 +32,10 @@
+ {
+    VkDevice dev_handle = vn_device_to_handle(dev);
+    VkDeviceMemory mem_handle = vn_device_memory_to_handle(mem);
++
++   ((VkMemoryAllocateInfo *)alloc_info)->allocationSize =
++      align64(alloc_info->allocationSize, 16384);
++
+    if (VN_PERF(NO_ASYNC_MEM_ALLOC)) {
+       return vn_call_vkAllocateMemory(dev->primary_ring, dev_handle,
+                                       alloc_info, NULL, &mem_handle);

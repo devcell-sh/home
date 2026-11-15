@@ -134,6 +134,16 @@ in
       export NIX_LD_LIBRARY_PATH="/opt/devcell/.nix-ld-libs''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
       export _DEVCELL_NIX_LD_LIBPATH_SET=1
     fi
+    # krunkit Venus GPU detection — override llvmpipe defaults set by sessionVariables.
+    if [ -z "''${_DEVCELL_GPU_DETECTED:-}" ] && [ -f /sys/class/dmi/id/product_name ] && grep -qi "libkrun" /sys/class/dmi/id/product_name 2>/dev/null; then
+      _vk_venus="${config.home.profileDirectory}/share/vulkan/icd.d/virtio_icd.$(uname -m).json"
+      if [ -f "$_vk_venus" ]; then
+        export VK_ICD_FILENAMES="$_vk_venus"
+        export GALLIUM_DRIVER=zink
+        unset LIBGL_ALWAYS_SOFTWARE
+      fi
+      export _DEVCELL_GPU_DETECTED=1
+    fi
   '';
 
   home.packages = with pkgs; [
@@ -309,16 +319,17 @@ in
   # xdg-open path also works for tools that bypass $BROWSER.
   home.sessionVariables.BROWSER = "chromium";
 
-  # Mesa llvmpipe software rendering — headless container has no GPU.
+  # Mesa rendering — detect krunkit (Venus/virtio GPU) vs headless (llvmpipe).
   # Paths go through the profile symlink (stable across generations) rather
   # than hardcoded store hashes that break on rebuild.
   home.sessionVariables.PKG_CONFIG_PATH = "$HOME/.local/lib/pkgconfig:${config.home.profileDirectory}/lib/pkgconfig:${config.home.profileDirectory}/share/pkgconfig";
   home.sessionVariables.C_INCLUDE_PATH = "$HOME/.local/include";
   home.sessionVariables.LIBRARY_PATH = "$HOME/.local/lib";
-  home.sessionVariables.LIBGL_ALWAYS_SOFTWARE = "1";
-  home.sessionVariables.GALLIUM_DRIVER = "llvmpipe";
   home.sessionVariables.LIBGL_DRIVERS_PATH = "${config.home.profileDirectory}/lib/dri";
   home.sessionVariables.__EGL_VENDOR_LIBRARY_DIRS = "${config.home.profileDirectory}/share/glvnd/egl_vendor.d";
+  # GPU defaults — overridden at runtime by krunkit detection below.
+  home.sessionVariables.LIBGL_ALWAYS_SOFTWARE = "1";
+  home.sessionVariables.GALLIUM_DRIVER = "llvmpipe";
   home.sessionVariables.VK_ICD_FILENAMES = "${config.home.profileDirectory}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json";
 
   xdg.mimeApps = {

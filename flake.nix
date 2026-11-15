@@ -40,6 +40,10 @@
     # gets nix tools via /opt/devcell dotfiles copied at container startup.
     user = {username = "devcell"; homeDirectory = "/opt/devcell";};
 
+    # Mesa Venus 16 KiB alignment overlay — fixes GPU passthrough inside
+    # libkrun/krunkit VMs on Apple Silicon (aarch64-linux guests only).
+    mesaVenusOverlay = import ./packages/mesa-venus-overlay.nix;
+
     # Build a homeManagerConfiguration for a given system and list of modules.
     mkHome = system: modules: let
       nixCfg = {
@@ -49,6 +53,8 @@
         # too many sub-derivation names to enumerate in a predicate).
         config.allowUnfree = true;
         config.android_sdk.accept_license = true;
+      } // lib.optionalAttrs (system == "aarch64-linux") {
+        overlays = [ mesaVenusOverlay ];
       };
       pkgsUnstable = import nixpkgs-unstable nixCfg;
       pkgsEdge = import nixpkgs-edge nixCfg;
@@ -194,6 +200,8 @@
         inherit system;
         config.allowUnfree = true;
         config.android_sdk.accept_license = true;
+      } // lib.optionalAttrs (system == "aarch64-linux") {
+        overlays = [ mesaVenusOverlay ];
       };
       pkgsUnstable = import nixpkgs-unstable nixCfg;
       pkgsEdge = import nixpkgs-edge nixCfg;
@@ -220,6 +228,8 @@
         inherit system;
         config.allowUnfree = true;
         config.android_sdk.accept_license = true;
+      } // lib.optionalAttrs (system == "aarch64-linux") {
+        overlays = [ mesaVenusOverlay ];
       };
       pkgsUnstable = import nixpkgs-unstable nixCfg;
       pkgsEdge = import nixpkgs-edge nixCfg;
@@ -518,11 +528,13 @@
       # remote builder produces the Linux image content, the host produces
       # the helpers that wire it all together.
       mkImagePackagesFor = hostSystem: targetSystem: let
-        pkgsForSys = import nixpkgs {
+        pkgsForSys = import nixpkgs ({
           system = targetSystem;
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
-        };
+        } // lib.optionalAttrs (targetSystem == "aarch64-linux") {
+          overlays = [ mesaVenusOverlay ];
+        });
         pkgsUnstableForSys = import nixpkgs-unstable {
           system = targetSystem;
           config.allowUnfree = true;

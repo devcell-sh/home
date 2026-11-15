@@ -39,8 +39,25 @@ echo "$XDG_RUNTIME_DIR" > "$S6_ENV/XDG_RUNTIME_DIR"
 echo "${SCALE}" > "$S6_ENV/GDK_SCALE"
 echo "1" > "$S6_ENV/GDK_DPI_SCALE"
 echo "${SCALE}" > "$S6_ENV/QT_SCALE_FACTOR"
-echo "1" > "$S6_ENV/LIBGL_ALWAYS_SOFTWARE"
-echo "llvmpipe" > "$S6_ENV/GALLIUM_DRIVER"
+# Detect krunkit VM (Venus/virtio GPU passthrough on Apple Silicon).
+_KRUNKIT=false
+if [ -f /sys/class/dmi/id/product_name ] && grep -qi "libkrun" /sys/class/dmi/id/product_name 2>/dev/null; then
+    _VK_VENUS="$_PROFILE/share/vulkan/icd.d/virtio_icd.$(uname -m).json"
+    if [ -f "$_VK_VENUS" ]; then
+        _KRUNKIT=true
+    fi
+fi
+
+if $_KRUNKIT; then
+    echo "Venus (krunkit GPU passthrough)" | devcell-event pipe
+    echo "$_VK_VENUS" > "$S6_ENV/VK_ICD_FILENAMES"
+    # Zink translates OpenGL to Vulkan over Venus.
+    echo "zink" > "$S6_ENV/GALLIUM_DRIVER"
+    echo "0" > "$S6_ENV/LIBGL_ALWAYS_SOFTWARE"
+else
+    echo "1" > "$S6_ENV/LIBGL_ALWAYS_SOFTWARE"
+    echo "llvmpipe" > "$S6_ENV/GALLIUM_DRIVER"
+fi
 echo "$_PROFILE/lib/dri" > "$S6_ENV/LIBGL_DRIVERS_PATH"
 echo "${__EGL_VENDOR_LIBRARY_DIRS:-$_PROFILE/share/glvnd/egl_vendor.d}" > "$S6_ENV/__EGL_VENDOR_LIBRARY_DIRS"
 echo "unix:$XDG_RUNTIME_DIR/pulse/native" > "$S6_ENV/PULSE_SERVER"

@@ -272,10 +272,11 @@ SHIMEOF
     '';
   };
 
-  # Static LD_LIBRARY_PATH fallback for the patchright-mcp-cell wrapper.
-  # This wrapper is a nix derivation baked at eval time -- can't source files at runtime.
-  # All other contexts (s6 services, interactive shells) use the merged
-  # /opt/devcell/.nix-ld-libs/ directory via NIX_LD_LIBRARY_PATH.
+  # Static LD_LIBRARY_PATH for the patchright-mcp-cell wrapper (a nix derivation
+  # baked at eval time that can't source runtime paths). Set to exactly this list;
+  # never inherit LD_LIBRARY_PATH from the caller — other nix wrappers may inject
+  # libs from a different nixpkgs pin whose glibc doesn't match NIX_LD.
+  # The interactive chromium wrapper uses nix-ld (NIX_LD_LIBRARY_PATH) instead.
   runtimeLibs = with pkgs; [
     glib
     nspr
@@ -1574,9 +1575,14 @@ SHIMEOF
     wrapperScript = pkgs.writeShellScript "patchright-mcp-cell-inner" ''
       export PLAYWRIGHT_BROWSERS_PATH="${browsers}"
       export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-      export LD_LIBRARY_PATH="${runtimeLibPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-      # Mesa Lavapipe -- software Vulkan ICD for WebGL via ANGLE->Vulkan->lvp
-      export VK_ICD_FILENAMES="${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json"
+      export LD_LIBRARY_PATH="${runtimeLibPath}"
+      # Vulkan ICD: Venus (krunkit GPU) when available, else Lavapipe (software).
+      _vk_venus="${pkgs.mesa}/share/vulkan/icd.d/virtio_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json"
+      if [ -f /sys/class/dmi/id/product_name ] && grep -qi "libkrun" /sys/class/dmi/id/product_name 2>/dev/null && [ -f "$_vk_venus" ]; then
+        export VK_ICD_FILENAMES="$_vk_venus"
+      else
+        export VK_ICD_FILENAMES="${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json"
+      fi
       ${lib.optionalString isAarch64 ''# x86_64 Chromium path (aarch64 only, runs via Rosetta)
       _CHROMIUM_X86="${chromiumX86}/bin/chromium"''}
 
@@ -1625,15 +1631,17 @@ SHIMEOF
       # and must run BEFORE the fingerprint overlay so cell login can override.
       _STEALTH_ARCH="''${DEVCELL_STEALTH_ARCH:-arm}"
       _STEALTH_PLATFORM="''${DEVCELL_STEALTH_PLATFORM:-Linux}"
+      # Binary selection: same logic as the unified chromium wrapper.
       _EXEC_PATH_OVERRIDE=""
+      ${lib.optionalString isAarch64 ''
       if [ -n "''${_CHROMIUM_X86:-}" ] && [ "$_STEALTH_ARCH" != "arm" ] && [ -x "$_CHROMIUM_X86" ]; then
         if timeout 10 "$_CHROMIUM_X86" --version >/dev/null 2>&1; then
           _EXEC_PATH_OVERRIDE="$_CHROMIUM_X86"
           export VK_ICD_FILENAMES="${mesaX86}/share/vulkan/icd.d/lvp_icd.x86_64.json"
         else
-          printf 'patchright-mcp-cell: WARNING: x86_64 Chromium failed to execute (no Rosetta?), falling back to native\n' >&2
+          printf 'patchright-mcp-cell: WARNING: x86_64 Chromium unavailable (no Rosetta?), using native\n' >&2
         fi
-      fi
+      fi''}
       # Detect real Chromium version from the browser binary so UA + brands match.
       _CHROME_BIN=$(find "''${PLAYWRIGHT_BROWSERS_PATH:-/dev/null}" -name 'chrome' -type f 2>/dev/null | tail -1)
       _CHROME_FULL_VER="141.0.0.0"
@@ -1923,27 +1931,55 @@ SHIMEOF
   #      instead of launching its own, so xdg-open OAuth flows and MCP browser
   #      automation share one chromium instance + one set of cookies/sessions.
   # Bound to 127.0.0.1 only -- exposing CDP on 0.0.0.0 is a remote-code-execution surface.
+  # Unified Chromium wrapper: single entry point for interactive use, $BROWSER,
+  # xdg-open, and MCP. Selects binary based on DEVCELL_STEALTH_ARCH and
+  # GPU flags based on krunkit detection.
   chromiumWrapper = pkgs.writeShellScriptBin "chromium" ''
     _profile="''${CHROMIUM_PROFILE_PATH:-$HOME/.chrome/''${APP_NAME:-default}}"
     mkdir -p "$_profile"
     # CELL-62: sweep stale SingletonLock/Cookie/Socket left by a crashed
     # peer (this wrapper and patchright-mcp-cell share the same profile dir).
     ${chromiumSingletonSweep} "$_profile"
-    exec ${browsers}/chromium-${patchrightChromiumRevision}/chrome-linux/chrome \
+
+    # Binary selection: DEVCELL_STEALTH_ARCH controls which Chromium runs.
+    _STEALTH_ARCH="''${DEVCELL_STEALTH_ARCH:-arm}"
+    _CHROME="${browsers}/chromium-${patchrightChromiumRevision}/chrome-linux/chrome"
+    ${lib.optionalString isAarch64 ''
+    if [ "$_STEALTH_ARCH" != "arm" ]; then
+      _X86="${chromiumX86}/bin/chromium"
+      if [ -x "$_X86" ] && timeout 10 "$_X86" --version >/dev/null 2>&1; then
+        _CHROME="$_X86"
+        export VK_ICD_FILENAMES="${mesaX86}/share/vulkan/icd.d/lvp_icd.x86_64.json"
+      else
+        printf 'chromium: WARNING: x86_64 binary unavailable (no Rosetta?), using native\n' >&2
+      fi
+    fi''}
+
+    # GPU flags: krunkit (Venus) gets real GPU, everything else gets software.
+    _GPU_FLAGS="--disable-gpu-compositing --enable-unsafe-swiftshader"
+    if [ -f /sys/class/dmi/id/product_name ] && grep -qi "libkrun" /sys/class/dmi/id/product_name 2>/dev/null; then
+      _vk_venus="${pkgs.mesa}/share/vulkan/icd.d/virtio_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json"
+      if [ -f "$_vk_venus" ] && [ "$_STEALTH_ARCH" = "arm" ]; then
+        export VK_ICD_FILENAMES="$_vk_venus"
+        _GPU_FLAGS="--enable-features=Vulkan --use-angle=vulkan"
+      fi
+    fi
+
+    # Strip LD_LIBRARY_PATH: nix wrappers (e.g. claude-code) inject libs
+    # from their own nixpkgs pin which may link a newer glibc than NIX_LD.
+    # The Patchright binary resolves libs via nix-ld (NIX_LD_LIBRARY_PATH).
+    unset LD_LIBRARY_PATH
+
+    exec "$_CHROME" \
       --user-data-dir="$_profile" \
       --remote-debugging-port=9222 \
       --remote-debugging-address=127.0.0.1 \
       --no-sandbox \
       --disable-infobars \
-      --disable-gpu-compositing \
-      --enable-unsafe-swiftshader \
+      $_GPU_FLAGS \
       --disable-dev-shm-usage \
       ${lib.concatStringsSep " " extensionArgs} \
       "$@"
-  '';
-
-  chromiumX86Wrapper = pkgs.writeShellScriptBin "chromium-x86" ''
-    exec "${chromiumX86}/bin/chromium" "$@"
   '';
 
 in {
@@ -1976,7 +2012,7 @@ in {
       pkgs.roboto
       pkgs.source-sans
       pkgs.inter
-    ] ++ lib.optionals isAarch64 [ chromiumX86Wrapper ];
+    ];
 
     home.sessionVariables = {
       # Both launchers use this browser bundle; Patchright adds its automation
